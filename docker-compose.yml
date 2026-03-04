@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  # Redis 服务
+  redis:
+    image: redis:7-alpine
+    container_name: manbotv-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - manbotv-network
+
+  # 后端服务 (开发模式)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: manbotv-backend
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - MANBO_SERVER_MODE=debug
+      - MANBO_REDIS_ADDR=redis:6379
+      - MANBO_LOG_LEVEL=debug
+    volumes:
+      - ./backend:/app
+      - ./backend/configs:/app/configs
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - manbotv-network
+    command: ["air", "-c", ".air.toml"]
+
+  # Redis 可视化工具 (可选)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: manbotv-redis-commander
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    depends_on:
+      - redis
+    networks:
+      - manbotv-network
+
+volumes:
+  redis-data:
+    driver: local
+
+networks:
+  manbotv-network:
+    driver: bridge

@@ -17,10 +17,11 @@ import (
 	"github.com/JoyMod/ManboTV/backend/internal/handler"
 	"github.com/JoyMod/ManboTV/backend/internal/middleware"
 	"github.com/JoyMod/ManboTV/backend/internal/model"
+	"github.com/JoyMod/ManboTV/backend/internal/repository/redis"
 	"github.com/JoyMod/ManboTV/backend/internal/service"
 )
 
-// 硬编码的 API 站点配置 (后续应从配置文件读取)
+// 默认API站点配置
 var defaultSites = []model.ApiSite{
 	{Key: "example1", API: "https://api1.example.com/api.php", Name: "示例源1"},
 	{Key: "example2", API: "https://api2.example.com/api.php", Name: "示例源2"},
@@ -51,6 +52,15 @@ func main() {
 		zap.String("version", "1.0.0"),
 	)
 
+	// 连接Redis
+	redisClient, err := redis.NewClient(&cfg.Redis, logger)
+	if err != nil {
+		logger.Error("连接Redis失败", zap.Error(err))
+		// 不退出，继续运行（降级为内存存储）
+	} else {
+		defer redisClient.Close()
+	}
+
 	// 设置 Gin 模式
 	gin.SetMode(cfg.Server.Mode)
 
@@ -68,9 +78,20 @@ func main() {
 		logger.Fatal("初始化图片服务失败", zap.Error(err))
 	}
 
+	var storageService model.StorageService
+	if redisClient != nil {
+		storageService = service.NewStorageService(redisClient, logger)
+		logger.Info("使用Redis存储")
+	} else {
+		// 降级：内存存储（后续实现）
+		logger.Warn("使用内存存储（数据将在重启后丢失）")
+	}
+
 	// 初始化处理器
 	searchHandler := handler.NewSearchHandler(searchService, logger, defaultSites)
 	imageHandler := handler.NewImageHandler(imageService, logger)
+	favoriteHandler := handler.NewFavoriteHandler(storageService, logger)
+	recordHandler := handler.NewRecordHandler(storageService, logger)
 
 	// 注册路由
 	apiV1 := r.Group("/api/v1")
@@ -83,7 +104,16 @@ func main() {
 		// 图片代理
 		apiV1.GET("/image", imageHandler.Proxy)
 		apiV1.GET("/image/header", imageHandler.ProxyWithHeader)
-		apiV1.GET("/image/stats", imageHandler.GetCacheStats)
+
+		// 收藏相关
+		apiV1.GET("/favorites", favoriteHandler.GetFavorites)
+		apiV1.POST("/favorites", favoriteHandler.AddFavorite)
+		apiV1.DELETE("/favorites/:key", favoriteHandler.DeleteFavorite)
+
+		// 播放记录相关
+		apiV1.GET("/playrecords", recordHandler.GetRecords)
+		apiV1.POST("/playrecords", recordHandler.SaveRecord)
+		apiV1.DELETE("/playrecords/:key", recordHandler.DeleteRecord)
 
 		// 健康检查
 		apiV1.GET("/health", func(c *gin.Context) {
