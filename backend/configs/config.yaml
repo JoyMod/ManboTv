@@ -1,0 +1,75 @@
+# ManboTV Backend Configuration
+
+# 服务器配置
+server:
+  host: "0.0.0.0"
+  port: 8080
+  mode: "debug"  # debug/release
+  read_timeout: 10s
+  write_timeout: 10s
+
+# 日志配置
+log:
+  level: "info"  # debug/info/warn/error
+  format: "json" # json/console
+  output: "stdout" # stdout/file
+  file_path: "logs/app.log"
+  max_size: 100    # MB
+  max_backups: 30
+  max_age: 7       # days
+  compress: true
+
+# Redis配置
+redis:
+  addr: "localhost:6379"
+  password: ""
+  db: 0
+  pool_size: 10
+  min_idle_conns: 5
+  max_retries: 3
+
+# 搜索配置
+search:
+  timeout: 10s
+  max_concurrent: 10
+  cache_minutes: 15
+  max_results_per_source: 50
+  max_pages: 3
+
+# 图片代理配置
+image_proxy:
+  timeout: 30s
+  cache_size: 1000          # LRU缓存数量
+  cache_max_item_size: 1048576  # 1MB
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.0"
+
+# HTTP客户端配置
+http_client:
+  max_idle_conns: 100
+  max_idle_conns_per_host: 10
+  idle_conn_timeout: 90s
+  timeout: 10s
+
+# 认证配置
+auth:
+  cookie_name: "auth_token"
+  token_expire_hours: 24
+  jwt_secret: "your-secret-key-change-in-production"
+
+# CORS配置
+cors:
+  allow_origins:
+    - "http://localhost:3000"
+    - "http://127.0.0.1:3000"
+  allow_methods:
+    - "GET"
+    - "POST"
+    - "PUT"
+    - "DELETE"
+    - "OPTIONS"
+  allow_headers:
+    - "Origin"
+    - "Content-Type"
+    - "Accept"
+    - "Authorization"
+  allow_credentials: true
