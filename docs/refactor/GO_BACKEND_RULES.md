@@ -99,9 +99,177 @@ var httpClient = &http.Client{
 
 ---
 
-## 4. 并发安全规范
+## 4. 并发控制规范 (强制使用 Channel)
 
-### Mutex 使用
+### 4.1 Channel 作为信号量 (Semaphore)
+```go
+// ✅ 正确: 使用 Channel 控制并发数 (推荐)
+const MaxConcurrency = 10
+
+semaphore := make(chan struct{}, MaxConcurrency)
+
+for _, task := range tasks {
+    task := task // 捕获
+    
+    select {
+    case semaphore <- struct{}{}: // 获取信号量
+        go func() {
+            defer func() { <-semaphore }() // 释放信号量
+            process(task)
+        }()
+    case <-ctx.Done():
+        return // 上下文取消
+    }
+}
+
+// ❌ 错误: 使用 WaitGroup + Mutex 计数
+var wg sync.WaitGroup
+var mu sync.Mutex
+var count int
+
+for _, task := range tasks {
+    wg.Add(1)
+    go func() {
+        defer wg.Done()
+        mu.Lock()
+        count++
+        mu.Unlock()
+        process(task)
+        mu.Lock()
+        count--
+        mu.Unlock()
+    }()
+}
+```
+
+### 4.2 Channel 收集结果 (替代锁)
+```go
+// ✅ 正确: 使用 Channel 收集结果，避免锁竞争
+resultChan := make(chan Result, len(tasks))
+
+for _, task := range tasks {
+    go func(t Task) {
+        resultChan <- process(t)
+    }(task)
+}
+
+// 收集结果
+for i := 0; i < len(tasks); i++ {
+    result := <-resultChan
+    allResults = append(allResults, result)
+}
+
+// ❌ 错误: 使用 Mutex 保护切片
+var mu sync.Mutex
+var results []Result
+
+for _, task := range tasks {
+    go func(t Task) {
+        r := process(t)
+        mu.Lock()
+        results = append(results, r)
+        mu.Unlock()
+    }(task)
+}
+```
+
+### 4.3 超时控制 (Select + Channel)
+```go
+// ✅ 正确: 使用 select 实现超时
+type Result struct {
+    data []Item
+    err  error
+}
+
+resultChan := make(chan Result, 1)
+
+go func() {
+    data, err := fetchData()
+    resultChan <- Result{data, err}
+}()
+
+select {
+case result := <-resultChan:
+    return result.data, result.err
+case <-time.After(5 * time.Second):
+    return nil, errors.New("timeout")
+case <-ctx.Done():
+    return nil, ctx.Err()
+}
+```
+
+### 4.4 原子操作 (Atomic) 替代 Mutex
+```go
+// ✅ 正确: 使用 atomic 替代 Mutex 做简单计数
+var completed int32
+
+go func() {
+    atomic.AddInt32(&completed, 1)
+}()
+
+// 读取
+count := atomic.LoadInt32(&completed)
+
+// ❌ 错误: 用 Mutex 做简单计数
+var mu sync.Mutex
+var count int
+
+mu.Lock()
+count++
+mu.Unlock()
+```
+
+### 4.5 扇出-扇入模式 (Fan-out/Fan-in)
+```go
+// Producer (扇出)
+func producer(jobs []Job) <-chan Job {
+    out := make(chan Job, len(jobs))
+    for _, job := range jobs {
+        out <- job
+    }
+    close(out)
+    return out
+}
+
+// Worker (处理)
+func worker(in <-chan Job) <-chan Result {
+    out := make(chan Result)
+    go func() {
+        defer close(out)
+        for job := range in {
+            out <- process(job)
+        }
+    }()
+    return out
+}
+
+// Consumer (扇入)
+func consumer(channels ...<-chan Result) <-chan Result {
+    var wg sync.WaitGroup
+    out := make(chan Result)
+    
+    output := func(c <-chan Result) {
+        defer wg.Done()
+        for result := range c {
+            out <- result
+        }
+    }
+    
+    wg.Add(len(channels))
+    for _, c := range channels {
+        go output(c)
+    }
+    
+    go func() {
+        wg.Wait()
+        close(out)
+    }()
+    
+    return out
+}
+```
+
+### 4.6 Mutex 使用 (仅限复杂状态)
 ```go
 // ✅ 字段紧邻 mutex
 type Cache struct {
