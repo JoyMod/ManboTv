@@ -56,7 +56,6 @@ func main() {
 	redisClient, err := redis.NewClient(&cfg.Redis, logger)
 	if err != nil {
 		logger.Error("连接Redis失败", zap.Error(err))
-		// 不退出，继续运行（降级为内存存储）
 	} else {
 		defer redisClient.Close()
 	}
@@ -72,18 +71,18 @@ func main() {
 
 	// 初始化服务
 	searchService := service.NewSearchService(&cfg.Search, &cfg.HTTPClient, logger)
-	
 	imageService, err := service.NewImageService(&cfg.ImageProxy, &cfg.HTTPClient, logger)
 	if err != nil {
 		logger.Fatal("初始化图片服务失败", zap.Error(err))
 	}
+	detailService := service.NewDetailService(&cfg.Search, &cfg.HTTPClient, logger)
+	suggestionService := service.NewSuggestionService(logger)
 
 	var storageService model.StorageService
 	if redisClient != nil {
 		storageService = service.NewStorageService(redisClient, logger)
 		logger.Info("使用Redis存储")
 	} else {
-		// 降级：内存存储（后续实现）
 		logger.Warn("使用内存存储（数据将在重启后丢失）")
 	}
 
@@ -92,6 +91,7 @@ func main() {
 	imageHandler := handler.NewImageHandler(imageService, logger)
 	favoriteHandler := handler.NewFavoriteHandler(storageService, logger)
 	recordHandler := handler.NewRecordHandler(storageService, logger)
+	detailHandler := handler.NewDetailHandler(detailService, logger, defaultSites)
 
 	// 注册路由
 	apiV1 := r.Group("/api/v1")
@@ -100,6 +100,15 @@ func main() {
 		apiV1.GET("/search", searchHandler.Search)
 		apiV1.GET("/search/one", searchHandler.SearchSingle)
 		apiV1.GET("/search/sites", searchHandler.GetSites)
+		apiV1.GET("/search/suggestions", func(c *gin.Context) {
+			query := c.Query("q")
+			suggestions, _ := suggestionService.GetSuggestions(c.Request.Context(), query)
+			c.JSON(http.StatusOK, model.Success(suggestions))
+		})
+
+		// 详情相关
+		apiV1.GET("/detail", detailHandler.GetDetail)
+		apiV1.GET("/details", detailHandler.GetDetails)
 
 		// 图片代理
 		apiV1.GET("/image", imageHandler.Proxy)
