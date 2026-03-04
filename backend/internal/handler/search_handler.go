@@ -57,7 +57,7 @@ func (h *SearchHandler) Search(c *gin.Context) {
 	h.logger.Info("搜索完成",
 		zap.String("query", req.Query),
 		zap.Int("total_results", len(results)),
-		zap.Int("returned_results", len(paginatedResults)),
+		zap.Int("returned_results", paginatedResults.PageInfo.PageSize),
 	)
 
 	c.JSON(http.StatusOK, model.Success(paginatedResults))

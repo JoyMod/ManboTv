@@ -46,7 +46,10 @@ func main() {
 	}
 	defer config.Sync()
 
-	logger.Info("服务启动中", zap.String("mode", cfg.Server.Mode))
+	logger.Info("服务启动中",
+		zap.String("mode", cfg.Server.Mode),
+		zap.String("version", "1.0.0"),
+	)
 
 	// 设置 Gin 模式
 	gin.SetMode(cfg.Server.Mode)
@@ -59,9 +62,15 @@ func main() {
 
 	// 初始化服务
 	searchService := service.NewSearchService(&cfg.Search, &cfg.HTTPClient, logger)
+	
+	imageService, err := service.NewImageService(&cfg.ImageProxy, &cfg.HTTPClient, logger)
+	if err != nil {
+		logger.Fatal("初始化图片服务失败", zap.Error(err))
+	}
 
 	// 初始化处理器
 	searchHandler := handler.NewSearchHandler(searchService, logger, defaultSites)
+	imageHandler := handler.NewImageHandler(imageService, logger)
 
 	// 注册路由
 	apiV1 := r.Group("/api/v1")
@@ -71,10 +80,16 @@ func main() {
 		apiV1.GET("/search/one", searchHandler.SearchSingle)
 		apiV1.GET("/search/sites", searchHandler.GetSites)
 
+		// 图片代理
+		apiV1.GET("/image", imageHandler.Proxy)
+		apiV1.GET("/image/header", imageHandler.ProxyWithHeader)
+		apiV1.GET("/image/stats", imageHandler.GetCacheStats)
+
 		// 健康检查
 		apiV1.GET("/health", func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{
 				"status":    "ok",
+				"version":   "1.0.0",
 				"timestamp": time.Now().Unix(),
 			})
 		})
