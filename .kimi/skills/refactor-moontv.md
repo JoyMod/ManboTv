@@ -1,179 +1,226 @@
 ---
 name: refactor-moontv
-description: MoonTV 重构开发指南 - Next.js 后端迁移到 Go + Gin
+description: ManboTV (MoonTV) 重构开发完整指南 - 前后端分离重构
 ---
 
-# MoonTV 重构 Skill
+# ManboTV 重构开发 Skill
 
-## 项目背景
-将 MoonTV (影视聚合播放器) 的后端从 Next.js API Routes 迁移到 Go + Gin，解决并发性能问题。
+## 项目概述
+将 MoonTV 影视聚合播放器从 Next.js 全栈重构为前后端分离架构：
+- **前端**: Next.js 14 (保留)
+- **后端**: Go 1.21+ + Gin (新建)
 
-## 核心原则
-1. **前端保持原样** - 只改动 API 调用地址
-2. **接口兼容** - Go 后端完全兼容原有 API 契约
-3. **性能优先** - Goroutine 并发、连接池、缓存
-4. **渐进重构** - 先核心功能 (search/proxy)，后边缘功能
+## 核心目标
+1. 性能提升: 并发 10x, 内存 5x
+2. 代码质量: 文件 ≤800行, 无魔法数值
+3. 可维护性: 清晰分层, 完善文档
 
-## 关键技术决策
+---
 
-### 1. 并发模型
+## 代码质量红线 (不可违反)
+
+### 1. 文件行数限制
+- **规则**: 任何代码文件不得超过 **800 行**
+- **范围**: Go/TS/JS/CSS (HTML除外)
+- **检查**: `find . -name "*.go" -exec wc -l {} + | awk '$1 > 800'`
+
+### 2. 禁止魔法数值
+- **规则**: 所有数值必须定义为具名常量
+- **示例**:
+  ```go
+  // ❌ 禁止
+  time.Sleep(100 * time.Millisecond)
+  
+  // ✅ 正确
+  const DefaultRetryDelay = 100 * time.Millisecond
+  time.Sleep(DefaultRetryDelay)
+  ```
+
+---
+
+## Go 后端工程规范
+
+### 错误处理
 ```go
-// 多源搜索 - 使用 errgroup 并发
-import "golang.org/x/sync/errgroup"
+// 包装错误保留上下文
+return fmt.Errorf("search from %s failed: %w", site.Name, err)
 
-func (s *SearchService) SearchMulti(ctx context.Context, query string, sites []ApiSite) ([]SearchResult, error) {
-    g, ctx := errgroup.WithContext(ctx)
-    results := make([][]SearchResult, len(sites))
-    
-    for i, site := range sites {
-        i, site := i, site // 闭包捕获
-        g.Go(func() error {
-            res, err := s.searchSingle(ctx, site, query)
-            if err != nil {
-                return nil // 忽略单个源错误
-            }
-            results[i] = res
-            return nil
-        })
-    }
-    
-    if err := g.Wait(); err != nil {
-        return nil, err
-    }
-    
-    return flatten(results), nil
-}
+// 错误分类
+var ErrNotFound = errors.New("resource not found")
+if errors.Is(err, ErrNotFound) { ... }
 ```
 
-### 2. HTTP Client 复用
+### Context 使用
 ```go
-// 全局复用 Client (不要每个请求 new)
+// 所有阻塞操作必须接收 Context
+func Search(ctx context.Context, query string) ([]Result, error)
+
+// 设置超时
+ctx, cancel := context.WithTimeout(parentCtx, 20*time.Second)
+defer cancel()
+```
+
+### 资源管理
+```go
+// defer 紧跟资源获取
+f, err := os.Open(file)
+if err != nil { return err }
+defer f.Close()
+
+// HTTP Client 复用 (全局)
 var httpClient = &http.Client{
-    Timeout: 10 * time.Second,
     Transport: &http.Transport{
-        MaxIdleConns:        100,
+        MaxIdleConns: 100,
         MaxIdleConnsPerHost: 10,
-        IdleConnTimeout:     90 * time.Second,
     },
 }
 ```
 
-### 3. 图片代理优化
+### 并发安全
 ```go
-// 1. 内存缓存热点图片
-// 2. 流式转发 (不全部读入内存)
-func (h *ImageHandler) Proxy(c *gin.Context) {
-    imageUrl := c.Query("url")
-    
-    resp, err := httpClient.Get(imageUrl)
-    if err != nil {
-        c.JSON(500, gin.H{"error": err.Error()})
-        return
-    }
-    defer resp.Body.Close()
-    
-    // 流式转发
-    c.DataFromReader(resp.StatusCode, resp.ContentLength, 
-        resp.Header.Get("Content-Type"), resp.Body, nil)
+// Mutex 字段紧邻
+type Cache struct {
+    mu    sync.RWMutex
+    items map[string]Item
+}
+
+// 最小化加锁范围
+func (c *Cache) Get(key string) {
+    c.mu.RLock()
+    item := c.items[key]
+    c.mu.RUnlock()
+    // 其他操作...
+}
+
+// 使用 errgroup 控制并发
+import "golang.org/x/sync/errgroup"
+
+g, ctx := errgroup.WithContext(ctx)
+for _, site := range sites {
+    site := site // 捕获
+    g.Go(func() error {
+        return search(site)
+    })
+}
+if err := g.Wait(); err != nil { ... }
+```
+
+### 日志规范
+```go
+// 结构化日志
+logger.Info("search completed",
+    zap.String("query", query),
+    zap.Int("results", len(results)),
+    zap.Duration("duration", elapsed),
+)
+
+// ❌ 禁止字符串拼接
+logger.Info(fmt.Sprintf("search %s completed", query))
+```
+
+---
+
+## 项目结构
+
+```
+ManboTv/
+├── frontend/              # 前端 (原项目保留)
+│   ├── src/
+│   └── package.json
+│
+├── backend/               # Go 后端 (新建)
+│   ├── cmd/server/
+│   │   └── main.go
+│   ├── internal/
+│   │   ├── config/
+│   │   ├── handler/       # HTTP处理器
+│   │   ├── service/       # 业务逻辑
+│   │   ├── repository/    # 数据访问
+│   │   ├── middleware/
+│   │   ├── model/
+│   │   └── util/
+│   ├── pkg/
+│   ├── configs/
+│   ├── go.mod
+│   └── Dockerfile
+│
+└── docs/                  # 文档
+    ├── requirements/      # PRD需求文档
+    └── refactor/          # 重构规则
+```
+
+---
+
+## API 契约
+
+### 统一响应
+```go
+type Response struct {
+    Code    int         `json:"code"`    // 0=成功
+    Message string      `json:"message"`
+    Data    interface{} `json:"data"`
 }
 ```
+
+### 核心接口
+- `GET /api/v1/search?q=xxx` - 聚合搜索
+- `GET /api/v1/image?url=xxx` - 图片代理
+- `GET /api/v1/detail?id=xxx` - 详情
+- `POST /api/v1/favorites` - 收藏
+- `POST /api/v1/playrecords` - 播放记录
+
+---
 
 ## 开发检查清单
 
-### 新增 API 时检查
-- [ ] 路由注册在 `internal/handler/xxx_handler.go`
-- [ ] 业务逻辑在 `internal/service/xxx_service.go`
-- [ ] 接口契约符合统一响应格式
-- [ ] 有超时控制 (`context.WithTimeout`)
-- [ ] 错误日志记录 (zap)
-- [ ] CORS 配置正确
+### 新增功能时检查
+- [ ] 文件行数 ≤ 800
+- [ ] 无常量数值直接出现在代码中
+- [ ] 函数接收 Context 参数
+- [ ] 错误使用 fmt.Errorf + %w 包装
+- [ ] HTTP Client 使用全局复用
+- [ ] 资源使用 defer 释放
+- [ ] 并发使用 errgroup/semaphore 控制
+- [ ] 日志使用结构化字段
+- [ ] 有单元测试覆盖
 
 ### 代码审查检查
 - [ ] 无资源泄漏 (defer close)
-- [ ] 无 Goroutine 泄漏 (使用 WaitGroup/errgroup)
+- [ ] 无 Goroutine 泄漏
 - [ ] 敏感信息不打印日志
 - [ ] 配置不硬编码
+- [ ] SQL 使用参数化查询
 
-## 常见陷阱
+---
 
-### ❌ 错误: 每个请求新建 HTTP Client
-```go
-// 错误 - 导致连接不复用
-client := &http.Client{}
-resp, _ := client.Get(url)
-```
+## 参考文档
 
-### ✅ 正确: 复用全局 Client
-```go
-// 正确 - 连接复用
-resp, _ := httpClient.Get(url)
-```
+| 文档 | 路径 |
+|-----|------|
+| 架构分析 | `docs/refactor/README.md` |
+| API映射 | `docs/refactor/API_MAPPING.md` |
+| 开发规则 | `docs/refactor/DEVELOPMENT_RULES.md` |
+| Go后端规则 | `docs/refactor/GO_BACKEND_RULES.md` |
+| PRD总览 | `docs/requirements/PRD_OVERVIEW.md` |
+| 前端PRD | `docs/requirements/PRD_FRONTEND.md` |
+| 后端PRD | `docs/requirements/PRD_BACKEND.md` |
+| API规范 | `docs/requirements/PRD_API.md` |
+| 数据库设计 | `docs/requirements/PRD_DATABASE.md` |
 
-### ❌ 错误: 不控制并发数
-```go
-// 错误 - 可能创建数千 Goroutine
-for _, site := range sites {
-    go search(site) // 无限制
-}
-```
+---
 
-### ✅ 正确: 使用信号量控制
-```go
-// 正确 - 最多10个并发
-sem := make(chan struct{}, 10)
-for _, site := range sites {
-    sem <- struct{}{}
-    go func() {
-        defer func() { <-sem }()
-        search(site)
-    }()
-}
-```
-
-## 前端适配
-
-### API 地址切换
-```typescript
-// 原来: 相对路径 (同域)
-const API_BASE = '/api'
-
-// 重构后: 可配置后端地址
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api/v1'
-```
-
-### CORS 配置
-Go 后端需配置允许前端域名:
-```go
-config := cors.Config{
-    AllowOrigins:     []string{"http://localhost:3000"},
-    AllowMethods:     []string{"GET", "POST", "PUT", "DELETE"},
-    AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
-    AllowCredentials: true,
-}
-```
-
-## 测试策略
-
-1. **单元测试**: `go test ./internal/service/...`
-2. **集成测试**: 使用 `httptest` 测试 Handler
-3. **性能测试**: 
-   ```bash
-   # 压测搜索接口
-   wrk -t12 -c400 -d30s "http://localhost:8080/api/v1/search?q=电影"
-   ```
-
-## 部署检查
+## 常用命令
 
 ```bash
-# 1. 构建
-make build
+# 检查文件行数
+find . -name "*.go" -exec wc -l {} + | awk '$1 > 800'
 
-# 2. 测试运行
-./bin/moontv-server -config configs/config.yaml
+# 运行测试
+go test -cover ./...
 
-# 3. 健康检查
-curl http://localhost:8080/health
+# 构建
+go build -o bin/server cmd/server/main.go
 
-# 4. 前端构建 (静态导出)
-cd frontend && npm run export
+# 运行
+./bin/server -config configs/config.yaml
 ```
