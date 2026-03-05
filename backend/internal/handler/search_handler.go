@@ -13,17 +13,27 @@ import (
 
 // SearchHandler 搜索处理器
 type SearchHandler struct {
-	service service.SearchService
-	logger  *zap.Logger
-	sites   []model.ApiSite
+	service      service.SearchService
+	logger       *zap.Logger
+	sites        []model.ApiSite
+	adminStorage model.AdminStorageService
+	ownerUser    string
 }
 
 // NewSearchHandler 创建搜索处理器
-func NewSearchHandler(service service.SearchService, logger *zap.Logger, sites []model.ApiSite) *SearchHandler {
+func NewSearchHandler(
+	service service.SearchService,
+	logger *zap.Logger,
+	sites []model.ApiSite,
+	adminStorage model.AdminStorageService,
+	ownerUser string,
+) *SearchHandler {
 	return &SearchHandler{
-		service: service,
-		logger:  logger,
-		sites:   sites,
+		service:      service,
+		logger:       logger,
+		sites:        sites,
+		adminStorage: adminStorage,
+		ownerUser:    ownerUser,
 	}
 }
 
@@ -44,7 +54,8 @@ func (h *SearchHandler) Search(c *gin.Context) {
 	)
 
 	// 执行搜索
-	results, err := h.service.Search(c.Request.Context(), req.Query, h.sites)
+	sites := h.resolveSites(c)
+	results, err := h.service.Search(c.Request.Context(), req.Query, sites)
 	if err != nil {
 		h.logger.Error("搜索失败", zap.Error(err))
 		c.JSON(http.StatusOK, model.Error(model.CodeInternalError, "搜索服务暂时不可用"))
@@ -78,8 +89,9 @@ func (h *SearchHandler) SearchSingle(c *gin.Context) {
 	}
 
 	// 查找站点配置
+	sites := h.resolveSites(c)
 	var targetSite *model.ApiSite
-	for _, site := range h.sites {
+	for _, site := range sites {
 		if site.Key == siteKey {
 			targetSite = &site
 			break
@@ -106,7 +118,12 @@ func (h *SearchHandler) SearchSingle(c *gin.Context) {
 
 // GetSites 获取可用站点列表
 func (h *SearchHandler) GetSites(c *gin.Context) {
-	c.JSON(http.StatusOK, model.Success(h.sites))
+	c.JSON(http.StatusOK, model.Success(h.resolveSites(c)))
+}
+
+func (h *SearchHandler) resolveSites(c *gin.Context) []model.ApiSite {
+	username := c.GetString("username")
+	return resolveVideoSites(c.Request.Context(), h.adminStorage, h.sites, username, h.ownerUser)
 }
 
 // paginate 分页处理

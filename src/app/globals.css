@@ -30,16 +30,19 @@ body {
 }
 
 html:not(.dark) body {
-  background: linear-gradient(
-    180deg,
-    #e6f3fb 0%,
-    #eaf3f7 18%,
-    #f7f7f3 38%,
-    #e9ecef 60%,
-    #dbe3ea 80%,
-    #d3dde6 100%
-  );
-  background-attachment: fixed;
+  background: #141414;
+}
+
+/* Netflix 风格深色主题 */
+body {
+  background-color: #141414;
+  color: #ffffff;
+}
+
+/* 全局文字选择颜色 */
+::selection {
+  background-color: #E50914;
+  color: white;
 }
 
 /* 自定义滚动条样式 */

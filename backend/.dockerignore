@@ -1,0 +1,28 @@
+# 二进制文件
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# 测试文件
+*_test.go
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# 版本控制
+.git
+.gitignore
+
+# 日志
+*.log
+
+# 临时文件
+tmp/
+temp/
+*.tmp

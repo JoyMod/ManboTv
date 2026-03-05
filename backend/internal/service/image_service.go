@@ -10,6 +10,7 @@ import (
 
 	"github.com/hashicorp/golang-lru/v2"
 	"go.uber.org/zap"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/JoyMod/ManboTV/backend/internal/config"
 )
@@ -30,11 +31,13 @@ type ImageResponse struct {
 
 // imageService 图片代理服务实现
 type imageService struct {
-	client      *http.Client
-	cache       *lru.Cache[string, *CacheItem]
-	logger      *zap.Logger
-	userAgent   string
+	client       *http.Client
+	cache        *lru.Cache[string, *CacheItem]
+	logger       *zap.Logger
+	userAgent    string
+	timeout      time.Duration
 	cacheMaxSize int64
+	inflight     singleflight.Group
 }
 
 // CacheItem 缓存项
@@ -46,8 +49,30 @@ type CacheItem struct {
 
 // NewImageService 创建图片代理服务
 func NewImageService(cfg *config.ImageProxyConfig, httpCfg *config.HTTPClientConfig, logger *zap.Logger) (ImageService, error) {
+	if cfg == nil {
+		cfg = &config.ImageProxyConfig{}
+	}
+	if httpCfg == nil {
+		httpCfg = &config.HTTPClientConfig{}
+	}
+
+	timeout := cfg.Timeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+
+	cacheSize := cfg.CacheSize
+	if cacheSize <= 0 {
+		cacheSize = 1000
+	}
+
+	cacheMaxItemSize := cfg.CacheMaxItemSize
+	if cacheMaxItemSize <= 0 {
+		cacheMaxItemSize = 1 << 20
+	}
+
 	client := &http.Client{
-		Timeout: cfg.Timeout,
+		Timeout: timeout,
 		Transport: &http.Transport{
 			MaxIdleConns:        httpCfg.MaxIdleConns,
 			MaxIdleConnsPerHost: httpCfg.MaxIdleConnsPerHost,
@@ -56,7 +81,7 @@ func NewImageService(cfg *config.ImageProxyConfig, httpCfg *config.HTTPClientCon
 	}
 
 	// 创建 LRU 缓存
-	cache, err := lru.New[string, *CacheItem](cfg.CacheSize)
+	cache, err := lru.New[string, *CacheItem](cacheSize)
 	if err != nil {
 		return nil, fmt.Errorf("创建缓存失败: %w", err)
 	}
@@ -66,27 +91,60 @@ func NewImageService(cfg *config.ImageProxyConfig, httpCfg *config.HTTPClientCon
 		cache:        cache,
 		logger:       logger,
 		userAgent:    cfg.UserAgent,
-		cacheMaxSize: cfg.CacheMaxItemSize,
+		timeout:      timeout,
+		cacheMaxSize: cacheMaxItemSize,
 	}, nil
 }
 
 // Proxy 代理图片请求
 func (s *imageService) Proxy(ctx context.Context, imageURL string) (*ImageResponse, error) {
-	// 检查缓存
-	if cached, ok := s.cache.Get(imageURL); ok {
-		s.logger.Debug("图片缓存命中",
-			zap.String("url", imageURL),
-			zap.Int("size", len(cached.Data)),
-		)
-		return &ImageResponse{
-			Data:        cached.Data,
-			ContentType: cached.ContentType,
-			Size:        len(cached.Data),
-			FromCache:   true,
-		}, nil
+	if cached, ok := s.getCachedImage(imageURL); ok {
+		return cached, nil
 	}
 
-	// 发起请求
+	result, err, _ := s.inflight.Do(imageURL, func() (interface{}, error) {
+		// 双重检查，防止并发期间已被其他请求写入缓存
+		if cached, ok := s.getCachedImage(imageURL); ok {
+			return cached, nil
+		}
+
+		fetchCtx, cancel := context.WithTimeout(context.Background(), s.timeout)
+		defer cancel()
+
+		return s.fetchImage(fetchCtx, imageURL)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	resp, ok := result.(*ImageResponse)
+	if !ok {
+		return nil, fmt.Errorf("图片响应类型错误")
+	}
+
+	return resp, nil
+}
+
+func (s *imageService) getCachedImage(imageURL string) (*ImageResponse, bool) {
+	cached, ok := s.cache.Get(imageURL)
+	if !ok {
+		return nil, false
+	}
+
+	s.logger.Debug("图片缓存命中",
+		zap.String("url", imageURL),
+		zap.Int("size", len(cached.Data)),
+	)
+
+	return &ImageResponse{
+		Data:        cached.Data,
+		ContentType: cached.ContentType,
+		Size:        len(cached.Data),
+		FromCache:   true,
+	}, true
+}
+
+func (s *imageService) fetchImage(ctx context.Context, imageURL string) (*ImageResponse, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("创建请求失败: %w", err)
@@ -107,37 +165,14 @@ func (s *imageService) Proxy(ctx context.Context, imageURL string) (*ImageRespon
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
-	// 读取响应
 	contentType := resp.Header.Get("Content-Type")
-	
-	// 限制大小，防止内存溢出
-	var data []byte
-	if resp.ContentLength > 0 && resp.ContentLength > s.cacheMaxSize {
-		// 大图片直接流式返回，不缓存
-		data, err = io.ReadAll(io.LimitReader(resp.Body, s.cacheMaxSize))
-		if err != nil {
-			return nil, fmt.Errorf("读取响应失败: %w", err)
-		}
-		s.logger.Info("大图片直接返回(不缓存)",
-			zap.String("url", imageURL),
-			zap.Int64("content_length", resp.ContentLength),
-		)
-		return &ImageResponse{
-			Data:        data,
-			ContentType: contentType,
-			Size:        len(data),
-			FromCache:   false,
-		}, nil
-	}
-
-	data, err = io.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("读取响应失败: %w", err)
 	}
 
 	elapsed := time.Since(start)
 
-	// 缓存小图片
 	if int64(len(data)) <= s.cacheMaxSize {
 		s.cache.Add(imageURL, &CacheItem{
 			Data:        data,
@@ -147,6 +182,12 @@ func (s *imageService) Proxy(ctx context.Context, imageURL string) (*ImageRespon
 		s.logger.Debug("图片已缓存",
 			zap.String("url", imageURL),
 			zap.Int("size", len(data)),
+		)
+	} else {
+		s.logger.Info("大图片直出(不缓存)",
+			zap.String("url", imageURL),
+			zap.Int("size", len(data)),
+			zap.Int64("cache_limit", s.cacheMaxSize),
 		)
 	}
 
@@ -172,7 +213,7 @@ func (s *imageService) WarmCache(imageURLs []string) {
 			go func(u string) {
 				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				defer cancel()
-				
+
 				_, err := s.Proxy(ctx, u)
 				if err != nil {
 					s.logger.Warn("缓存预热失败", zap.String("url", u), zap.Error(err))

@@ -152,6 +152,33 @@ func (c *Client) LTrim(ctx context.Context, key string, start, stop int64) error
 	return c.client.LTrim(ctx, key, start, stop).Err()
 }
 
+// LRem 删除列表中的元素
+func (c *Client) LRem(ctx context.Context, key string, count int64, value interface{}) error {
+	return c.client.LRem(ctx, key, count, value).Err()
+}
+
+// ========== Set 集合操作 ==========
+
+// SAdd 添加集合成员
+func (c *Client) SAdd(ctx context.Context, key string, members ...interface{}) error {
+	return c.client.SAdd(ctx, key, members...).Err()
+}
+
+// SMembers 获取集合所有成员
+func (c *Client) SMembers(ctx context.Context, key string) ([]string, error) {
+	return c.client.SMembers(ctx, key).Result()
+}
+
+// SRem 移除集合成员
+func (c *Client) SRem(ctx context.Context, key string, members ...interface{}) error {
+	return c.client.SRem(ctx, key, members...).Err()
+}
+
+// SIsMember 检查是否是集合成员
+func (c *Client) SIsMember(ctx context.Context, key string, member interface{}) (bool, error) {
+	return c.client.SIsMember(ctx, key, member).Result()
+}
+
 // Pipeline 获取Pipeline
 func (c *Client) Pipeline() redis.Pipeliner {
 	return c.client.Pipeline()

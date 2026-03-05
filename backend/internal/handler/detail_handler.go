@@ -13,17 +13,27 @@ import (
 
 // DetailHandler 详情处理器
 type DetailHandler struct {
-	service service.DetailService
-	logger  *zap.Logger
-	sites   []model.ApiSite
+	service      service.DetailService
+	logger       *zap.Logger
+	sites        []model.ApiSite
+	adminStorage model.AdminStorageService
+	ownerUser    string
 }
 
 // NewDetailHandler 创建详情处理器
-func NewDetailHandler(service service.DetailService, logger *zap.Logger, sites []model.ApiSite) *DetailHandler {
+func NewDetailHandler(
+	service service.DetailService,
+	logger *zap.Logger,
+	sites []model.ApiSite,
+	adminStorage model.AdminStorageService,
+	ownerUser string,
+) *DetailHandler {
 	return &DetailHandler{
-		service: service,
-		logger:  logger,
-		sites:   sites,
+		service:      service,
+		logger:       logger,
+		sites:        sites,
+		adminStorage: adminStorage,
+		ownerUser:    ownerUser,
 	}
 }
 
@@ -37,9 +47,11 @@ func (h *DetailHandler) GetDetail(c *gin.Context) {
 		return
 	}
 
+	sites := resolveVideoSites(c.Request.Context(), h.adminStorage, h.sites, c.GetString("username"), h.ownerUser)
+
 	// 查找源配置
 	var targetSite *model.ApiSite
-	for _, site := range h.sites {
+	for _, site := range sites {
 		if site.Key == sourceKey {
 			targetSite = &site
 			break
@@ -78,9 +90,11 @@ func (h *DetailHandler) GetDetails(c *gin.Context) {
 		return
 	}
 
+	sites := resolveVideoSites(c.Request.Context(), h.adminStorage, h.sites, c.GetString("username"), h.ownerUser)
+
 	h.logger.Info("多源获取详情", zap.String("id", id))
 
-	details, err := h.service.GetDetails(c.Request.Context(), h.sites, id)
+	details, err := h.service.GetDetails(c.Request.Context(), sites, id)
 	if err != nil {
 		h.logger.Error("获取详情失败", zap.Error(err))
 		c.JSON(http.StatusOK, model.Error(model.CodeInternalError, "获取详情失败"))

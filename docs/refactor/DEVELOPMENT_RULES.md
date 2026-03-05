@@ -2,23 +2,31 @@
 
 ## 1. 代码规范 (Code Style)
 
+### 沟通规范
+
+- 默认使用中文与用户沟通（包括进度同步、问题说明、验收结果）
+- 仅在用户明确要求英文或其他语言时切换
+
 ### Go 代码规范
+
 - **格式**: 使用 `gofmt` 自动格式化
-- **命名**: 
+- **命名**:
   - 导出成员: PascalCase (如 `SearchService`)
   - 私有成员: camelCase (如 `searchCache`)
   - 包名: 小写单数 (如 `service`, `repository`)
 - **错误处理**: 必须处理所有错误, 禁止忽略
+
   ```go
   // ✅ 正确
   result, err := service.Search(ctx, query)
   if err != nil {
       return nil, fmt.Errorf("search failed: %w", err)
   }
-  
+
   // ❌ 错误
   result, _ := service.Search(ctx, query)
   ```
+
 - **注释**: 导出成员必须有注释, 注释以成员名开头
   ```go
   // SearchService 处理搜索相关业务逻辑
@@ -26,6 +34,7 @@
   ```
 
 ### Git 提交规范
+
 - **格式**: `<type>(<scope>): <subject>`
 - **类型**:
   - `feat`: 新功能
@@ -114,6 +123,7 @@ frontend/                    # 前端 (保持原样)
 ## 3. 技术约束 (Constraints)
 
 ### 依赖管理
+
 - **Go 版本**: >= 1.21
 - **核心依赖**:
   ```go
@@ -127,6 +137,7 @@ frontend/                    # 前端 (保持原样)
   ```
 
 ### 性能约束
+
 - **超时控制**: 所有外部 HTTP 调用必须有超时
   ```go
   ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -145,6 +156,7 @@ frontend/                    # 前端 (保持原样)
   ```
 
 ### 安全约束
+
 - **CORS**: 只允许特定域名访问
 - **认证**: JWT Token, 有效期 24h
 - **速率限制**: IP 级别限流 (100 req/min)
@@ -155,6 +167,7 @@ frontend/                    # 前端 (保持原样)
 ## 4. 接口契约 (API Contract)
 
 ### 统一响应格式
+
 ```go
 type Response struct {
     Code    int         `json:"code"`    // 0=成功, 非0=错误码
@@ -178,6 +191,7 @@ type Response struct {
 ```
 
 ### 分页格式
+
 ```go
 type Pagination struct {
     Page      int         `json:"page"`
@@ -193,19 +207,29 @@ type Pagination struct {
 ## 5. 测试规范
 
 ### 单元测试
+
 - 所有 Service 层必须有单元测试
 - 覆盖率 >= 60%
 - 命名: `xxx_test.go`
 
 ### 集成测试
+
 - API Handler 层必须有集成测试
 - 使用 `httptest` 模拟 HTTP 请求
+
+### 重构验收（强制）
+
+- 每完成一个重构模块，必须立刻执行一次模块级验收，禁止累计多个模块后再统一验证
+- 验收必须基于 Docker 实际运行环境（`docker compose up -d --build`）
+- 验收必须包含该模块核心接口的 `curl` 实测（至少覆盖成功链路，建议覆盖失败链路）
+- 当前模块未通过前，不允许进入下一个模块改造
 
 ---
 
 ## 6. 部署规范
 
 ### 构建
+
 ```bash
 # 开发
 make dev
@@ -217,10 +241,10 @@ make build-windows
 ```
 
 ### Docker
+
 - 多阶段构建
 - 镜像大小 < 50MB (使用 alpine/scratch)
 - 非 root 用户运行
-
 
 ---
 
@@ -231,6 +255,7 @@ make build-windows
 **规则**: 单个代码文件不得超过 **800 行** (不含空行和注释)
 
 **适用范围**:
+
 - ✅ Go 后端代码 (`.go`)
 - ✅ TypeScript/JavaScript 前端代码 (`.ts`, `.tsx`, `.js`, `.jsx`)
 - ✅ CSS/SCSS 样式文件
@@ -238,6 +263,7 @@ make build-windows
 - ❌ 自动生成的代码 (除外)
 
 **检查命令**:
+
 ```bash
 # Go 文件行数检查
 find . -name "*.go" -not -path "./vendor/*" -exec wc -l {} + | awk '$1 > 800 {print $2 ": " $1 " lines"}'
@@ -247,6 +273,7 @@ find . -name "*.ts" -o -name "*.tsx" | grep -v node_modules | xargs wc -l | awk 
 ```
 
 **拆分策略**:
+
 ```go
 // ❌ 错误: search_service.go (1200 行)
 // 包含: 搜索逻辑 + 缓存逻辑 + 结果排序 + 过滤逻辑
@@ -272,11 +299,11 @@ find . -name "*.ts" -o -name "*.tsx" | grep -v node_modules | xargs wc -l | awk 
 func Search(ctx context.Context, query string) ([]Result, error) {
     ctx, cancel := context.WithTimeout(ctx, 20000)  // 魔法数值: 20000 是什么?
     defer cancel()
-    
+
     if len(results) > 50 {  // 魔法数值: 50 是什么?
         results = results[:50]
     }
-    
+
     time.Sleep(100 * time.Millisecond)  // 魔法数值: 100
     return results, nil
 }
@@ -285,13 +312,14 @@ func Search(ctx context.Context, query string) ([]Result, error) {
 ```typescript
 // TypeScript 前端 - 错误
 function fetchData() {
-    const timeout = 30000;  // 魔法数值
-    const maxRetries = 3;   // 魔法数值
-    const pageSize = 20;    // 魔法数值
-    
-    if (items.length > 100) {  // 魔法数值
-        items = items.slice(0, 100);
-    }
+  const timeout = 30000; // 魔法数值
+  const maxRetries = 3; // 魔法数值
+  const pageSize = 20; // 魔法数值
+
+  if (items.length > 100) {
+    // 魔法数值
+    items = items.slice(0, 100);
+  }
 }
 ```
 
@@ -313,11 +341,11 @@ const (
 func Search(ctx context.Context, query string) ([]Result, error) {
     ctx, cancel := context.WithTimeout(ctx, DefaultSearchTimeout)
     defer cancel()
-    
+
     if len(results) > MaxSearchResults {
         results = results[:MaxSearchResults]
     }
-    
+
     time.Sleep(DefaultRetryDelay)
     return results, nil
 }
@@ -327,32 +355,32 @@ func Search(ctx context.Context, query string) ([]Result, error) {
 // TypeScript 前端 - 正确
 // constants/api.ts
 export const API_CONSTANTS = {
-    TIMEOUT: {
-        DEFAULT: 30000,      // 默认请求超时 (ms)
-        SEARCH: 20000,       // 搜索请求超时 (ms)
-        UPLOAD: 60000,       // 上传请求超时 (ms)
-    },
-    RETRY: {
-        MAX_ATTEMPTS: 3,     // 最大重试次数
-        DELAY_MS: 1000,      // 重试间隔 (ms)
-    },
-    PAGINATION: {
-        DEFAULT_PAGE_SIZE: 20,   // 默认每页条数
-        MAX_PAGE_SIZE: 100,      // 最大每页条数
-        FIRST_PAGE: 1,           // 起始页码
-    },
+  TIMEOUT: {
+    DEFAULT: 30000, // 默认请求超时 (ms)
+    SEARCH: 20000, // 搜索请求超时 (ms)
+    UPLOAD: 60000, // 上传请求超时 (ms)
+  },
+  RETRY: {
+    MAX_ATTEMPTS: 3, // 最大重试次数
+    DELAY_MS: 1000, // 重试间隔 (ms)
+  },
+  PAGINATION: {
+    DEFAULT_PAGE_SIZE: 20, // 默认每页条数
+    MAX_PAGE_SIZE: 100, // 最大每页条数
+    FIRST_PAGE: 1, // 起始页码
+  },
 } as const;
 
 // hooks/useSearch.ts
 import { API_CONSTANTS } from '@/constants/api';
 
 function useSearch() {
-    const { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } = API_CONSTANTS.PAGINATION;
-    
-    const fetchData = async (pageSize: number = DEFAULT_PAGE_SIZE) => {
-        const limit = Math.min(pageSize, MAX_PAGE_SIZE);
-        // ...
-    };
+  const { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } = API_CONSTANTS.PAGINATION;
+
+  const fetchData = async (pageSize: number = DEFAULT_PAGE_SIZE) => {
+    const limit = Math.min(pageSize, MAX_PAGE_SIZE);
+    // ...
+  };
 }
 ```
 
@@ -402,28 +430,28 @@ const (
 
 // 播放器相关
 export const PLAYER = {
-    SEEK_STEP_SECONDS: 10,           // 快进/快退步长(秒)
-    VOLUME_STEP: 0.1,                // 音量调节步长
-    MIN_PLAYBACK_RATE: 0.5,          // 最小播放速度
-    MAX_PLAYBACK_RATE: 2.0,          // 最大播放速度
-    PLAYBACK_RATE_STEP: 0.25,        // 播放速度调节步长
-    SKIP_INTRO_SECONDS: 85,          // 跳过片头默认时长
-    SKIP_OUTRO_SECONDS: 120,         // 跳过片尾默认时长
+  SEEK_STEP_SECONDS: 10, // 快进/快退步长(秒)
+  VOLUME_STEP: 0.1, // 音量调节步长
+  MIN_PLAYBACK_RATE: 0.5, // 最小播放速度
+  MAX_PLAYBACK_RATE: 2.0, // 最大播放速度
+  PLAYBACK_RATE_STEP: 0.25, // 播放速度调节步长
+  SKIP_INTRO_SECONDS: 85, // 跳过片头默认时长
+  SKIP_OUTRO_SECONDS: 120, // 跳过片尾默认时长
 } as const;
 
 // UI 相关
 export const UI = {
-    DEBOUNCE_DELAY_MS: 300,          // 防抖延迟
-    TOAST_DURATION_MS: 3000,         // Toast 显示时长
-    MODAL_ANIMATION_MS: 200,         // 弹窗动画时长
-    INFINITE_SCROLL_THRESHOLD: 100,  // 无限滚动触发阈值(px)
+  DEBOUNCE_DELAY_MS: 300, // 防抖延迟
+  TOAST_DURATION_MS: 3000, // Toast 显示时长
+  MODAL_ANIMATION_MS: 200, // 弹窗动画时长
+  INFINITE_SCROLL_THRESHOLD: 100, // 无限滚动触发阈值(px)
 } as const;
 
 // 缓存相关
 export const CACHE = {
-    SEARCH_TTL_MINUTES: 15,          // 搜索结果缓存时间
-    IMAGE_TTL_HOURS: 24,             // 图片缓存时间
-    CONFIG_TTL_MINUTES: 5,           // 配置缓存时间
+  SEARCH_TTL_MINUTES: 15, // 搜索结果缓存时间
+  IMAGE_TTL_HOURS: 24, // 图片缓存时间
+  CONFIG_TTL_MINUTES: 5, // 配置缓存时间
 } as const;
 ```
 
@@ -437,6 +465,7 @@ export const CACHE = {
 - [ ] 相同含义的数值没有在多处重复定义
 
 **自动化检查** (GitHub Actions):
+
 ```yaml
 name: Code Quality Check
 on: [pull_request]
@@ -460,6 +489,7 @@ jobs:
 ## 8. 文件组织规范
 
 ### 8.1 目录命名
+
 ```
 ✅ 正确:
 ├── search/
@@ -474,6 +504,7 @@ jobs:
 ```
 
 ### 8.2 文件命名
+
 ```
 ✅ 正确:
 ├── search_service.go
@@ -491,6 +522,7 @@ jobs:
 ### 8.3 拆分示例
 
 **原始文件 (1000+ 行) - 需要拆分**:
+
 ```go
 // admin_service.go - 1000 行
 func (s *AdminService) ManageUser() {}
@@ -502,6 +534,7 @@ func (s *AdminService) DataImport() {}
 ```
 
 **拆分后**:
+
 ```
 admin/
 ├── service.go           (100 行) - AdminService 定义和初始化

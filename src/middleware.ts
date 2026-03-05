@@ -133,6 +133,7 @@ function shouldSkipAuth(pathname: string): boolean {
 // 配置middleware匹配规则
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|login|warning|api/login|api/register|api/logout|api/cron|api/server-config).*)',
+    // 排除静态资源、登录相关页面、以及所有 API 路由（API 认证由后端处理）
+    '/((?!_next/static|_next/image|favicon.ico|login|warning|api/).*)',
   ],
 };

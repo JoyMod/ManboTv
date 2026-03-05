@@ -12,7 +12,6 @@ import (
 	"net/url"
 	"strings"
 	"sync/atomic"
-	"time"
 
 	"go.uber.org/zap"
 

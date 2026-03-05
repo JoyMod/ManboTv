@@ -1,2 +1,60 @@
-.env
-.env*.local
+# 依赖
+node_modules
+.pnp
+.pnp.js
+
+# 构建输出
+.next
+dist
+out
+build
+
+# 测试
+coverage
+*.test.js
+*.test.ts
+*.test.tsx
+*.spec.js
+*.spec.ts
+*.spec.tsx
+
+# 开发环境
+.env.local
+.env.development
+.env.test
+.env.production
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# 版本控制
+.git
+.gitignore
+.gitattributes
+
+# 文档
+README.md
+CHANGELOG
+LICENSE
+docs
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# 其他
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+*.pem
+
+# Go 后端 (前端构建不需要)
+backend/bin
+backend/*.log

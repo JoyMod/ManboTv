@@ -1,60 +1,103 @@
 version: '3.8'
 
+# ManboTV 完整部署配置
+# 包含: 前端(nginx) + Go后端 + Redis
+# 
+# 使用方法:
+# 1. 构建: docker-compose build
+# 2. 启动: docker-compose up -d
+# 3. 查看日志: docker-compose logs -f
+# 4. 停止: docker-compose down
+
 services:
-  # Redis 服务
+  # Redis 数据库
   redis:
     image: redis:7-alpine
     container_name: manbotv-redis
     restart: unless-stopped
-    ports:
-      - "6379:6379"
     volumes:
       - redis-data:/data
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 3s
       retries: 3
+      start_period: 5s
     networks:
       - manbotv-network
 
-  # 后端服务 (开发模式)
-  backend:
+  # Go 后端 API
+  api:
     build:
       context: ./backend
-      dockerfile: Dockerfile.dev
-    container_name: manbotv-backend
+      dockerfile: Dockerfile
+    container_name: manbotv-api
     restart: unless-stopped
-    ports:
-      - "8080:8080"
     environment:
-      - MANBO_SERVER_MODE=debug
-      - MANBO_REDIS_ADDR=redis:6379
-      - MANBO_LOG_LEVEL=debug
-    volumes:
-      - ./backend:/app
-      - ./backend/configs:/app/configs
+      # 服务器配置
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8080
+      - SERVER_MODE=release
+      
+      # Redis 配置
+      - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=
+      - REDIS_DB=0
+      
+      # 日志配置
+      - LOG_LEVEL=info
+      - LOG_FORMAT=json
+      
+      # 认证配置 (请修改默认密码!)
+      - AUTH_COOKIE_NAME=auth
+      - AUTH_TOKEN_EXPIRE_HOURS=168
+      
+      # 管理员账号 (首次启动后请修改!)
+      - USERNAME=${USERNAME:-admin}
+      - PASSWORD=${PASSWORD:-admin123}
     depends_on:
       redis:
         condition: service_healthy
     networks:
       - manbotv-network
-    command: ["air", "-c", ".air.toml"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
-  # Redis 可视化工具 (可选)
-  redis-commander:
-    image: rediscommander/redis-commander:latest
-    container_name: manbotv-redis-commander
+  # 前端 (Nginx)
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: manbotv-web
     restart: unless-stopped
     ports:
-      - "8081:8081"
+      - "${WEB_PORT:-3000}:3000"
     environment:
-      - REDIS_HOSTS=local:redis:6379
+      # API 地址 (容器内部通信)
+      - API_BASE_URL=http://api:8080
     depends_on:
-      - redis
+      api:
+        condition: service_healthy
     networks:
       - manbotv-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
 
 volumes:
   redis-data:
@@ -63,3 +106,6 @@ volumes:
 networks:
   manbotv-network:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

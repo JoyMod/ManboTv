@@ -4,6 +4,7 @@ package handler
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -31,6 +32,10 @@ func NewImageHandler(service service.ImageService, logger *zap.Logger) *ImageHan
 func (h *ImageHandler) Proxy(c *gin.Context) {
 	imageURL := c.Query("url")
 	if imageURL == "" {
+		if isLegacyImagePath(c.FullPath()) {
+			c.String(http.StatusBadRequest, "Missing URL parameter")
+			return
+		}
 		c.JSON(http.StatusOK, model.Error(model.CodeInvalidParams, "缺少图片URL参数"))
 		return
 	}
@@ -47,6 +52,10 @@ func (h *ImageHandler) Proxy(c *gin.Context) {
 			zap.String("url", imageURL),
 			zap.Error(err),
 		)
+		if isLegacyImagePath(c.FullPath()) {
+			c.Redirect(http.StatusTemporaryRedirect, "/placeholder-poster.svg")
+			return
+		}
 		c.JSON(http.StatusOK, model.Error(model.CodeInternalError, "获取图片失败"))
 		return
 	}
@@ -54,13 +63,13 @@ func (h *ImageHandler) Proxy(c *gin.Context) {
 	// 设置响应头
 	c.Header("Content-Type", resp.ContentType)
 	c.Header("Content-Length", strconv.Itoa(resp.Size))
-	
+
 	// 缓存控制 (半年)
 	cacheSeconds := 15720000
 	c.Header("Cache-Control", "public, max-age="+strconv.Itoa(cacheSeconds))
 	c.Header("CDN-Cache-Control", "public, s-maxage="+strconv.Itoa(cacheSeconds))
 	c.Header("Vercel-CDN-Cache-Control", "public, s-maxage="+strconv.Itoa(cacheSeconds))
-	
+
 	if resp.FromCache {
 		c.Header("X-Cache", "HIT")
 	} else {
@@ -74,8 +83,15 @@ func (h *ImageHandler) Proxy(c *gin.Context) {
 func (h *ImageHandler) ProxyWithHeader(c *gin.Context) {
 	imageURL := c.Query("url")
 	referer := c.Query("referer")
-	
+	if referer == "" {
+		referer = c.Query("header")
+	}
+
 	if imageURL == "" {
+		if isLegacyImagePath(c.FullPath()) {
+			c.String(http.StatusBadRequest, "Missing URL parameter")
+			return
+		}
 		c.JSON(http.StatusOK, model.Error(model.CodeInvalidParams, "缺少图片URL参数"))
 		return
 	}
@@ -92,6 +108,10 @@ func (h *ImageHandler) ProxyWithHeader(c *gin.Context) {
 			zap.String("url", imageURL),
 			zap.Error(err),
 		)
+		if isLegacyImagePath(c.FullPath()) {
+			c.Redirect(http.StatusTemporaryRedirect, "/placeholder-poster.svg")
+			return
+		}
 		c.JSON(http.StatusOK, model.Error(model.CodeInternalError, "获取图片失败"))
 		return
 	}
@@ -102,6 +122,10 @@ func (h *ImageHandler) ProxyWithHeader(c *gin.Context) {
 	c.Header("Cache-Control", "public, max-age=15720000")
 
 	c.Data(http.StatusOK, resp.ContentType, resp.Data)
+}
+
+func isLegacyImagePath(path string) bool {
+	return strings.HasPrefix(path, "/api/image")
 }
 
 // GetCacheStats 获取缓存统计 (管理接口)

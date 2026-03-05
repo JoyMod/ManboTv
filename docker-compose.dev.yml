@@ -1,0 +1,71 @@
+version: '3.8'
+
+# ManboTV 开发环境配置
+# 前端热重载 + Go 后端 air 热重载
+
+services:
+  # Redis
+  redis-dev:
+    image: redis:7-alpine
+    container_name: manbotv-redis-dev
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-dev-data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - manbotv-dev-network
+
+  # Go 后端 (热重载)
+  api-dev:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: manbotv-api-dev
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - SERVER_MODE=debug
+      - SERVER_PORT=8080
+      - REDIS_ADDR=redis-dev:6379
+      - LOG_LEVEL=debug
+      - LOG_FORMAT=console
+      - USERNAME=admin
+      - PASSWORD=admin
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - redis-dev
+    networks:
+      - manbotv-dev-network
+    command: ["air", "-c", ".air.toml"]
+
+  # 前端 (热重载)
+  web-dev:
+    image: node:20-alpine
+    container_name: manbotv-web-dev
+    working_dir: /app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_BASE_URL=http://localhost:8080
+      - NODE_ENV=development
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - api-dev
+    networks:
+      - manbotv-dev-network
+    command: ["sh", "-c", "npm install -g pnpm && pnpm install && pnpm dev"]
+
+volumes:
+  redis-dev-data:
+
+networks:
+  manbotv-dev-network:
+    driver: bridge

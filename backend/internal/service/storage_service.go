@@ -174,7 +174,11 @@ func (s *storageService) SavePlayRecord(ctx context.Context, username string, re
 	key := generateKey("rec", username)
 	field := record.Source + "+" + record.VodID
 
-	record.UpdatedAt = time.Now().Unix()
+	now := time.Now().Unix()
+	record.UpdatedAt = now
+	if record.SaveTime == 0 {
+		record.SaveTime = now
+	}
 
 	data, err := json.Marshal(record)
 	if err != nil {
@@ -269,10 +273,105 @@ func (s *storageService) AddSearchHistory(ctx context.Context, username string, 
 	return s.redis.LTrim(ctx, key, 0, 99)
 }
 
+// RemoveSearchHistory 删除单条搜索历史
+func (s *storageService) RemoveSearchHistory(ctx context.Context, username string, keyword string) error {
+	if keyword == "" {
+		return nil
+	}
+	key := generateKey("hist", username)
+	return s.redis.LRem(ctx, key, 0, keyword)
+}
+
 // ClearSearchHistory 清空搜索历史
 func (s *storageService) ClearSearchHistory(ctx context.Context, username string) error {
 	key := generateKey("hist", username)
 	return s.redis.Del(ctx, key)
+}
+
+// ---------- 跳过配置相关 ----------
+
+// GetSkipConfig 获取跳过配置
+func (s *storageService) GetSkipConfig(ctx context.Context, username string, source string, vodID string) (*model.SkipConfig, error) {
+	key := generateKey("skip", username)
+	field := source + "+" + vodID
+
+	data, err := s.redis.HGet(ctx, key, field)
+	if err != nil {
+		return nil, fmt.Errorf("获取跳过配置失败: %w", err)
+	}
+	if data == "" {
+		return nil, nil
+	}
+
+	var config model.SkipConfig
+	if err := json.Unmarshal([]byte(data), &config); err != nil {
+		return nil, fmt.Errorf("解析跳过配置失败: %w", err)
+	}
+
+	return &config, nil
+}
+
+// SetSkipConfig 设置跳过配置
+func (s *storageService) SetSkipConfig(ctx context.Context, username string, source string, vodID string, config *model.SkipConfig) error {
+	key := generateKey("skip", username)
+	field := source + "+" + vodID
+
+	data, err := json.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("序列化跳过配置失败: %w", err)
+	}
+
+	if err := s.redis.HSet(ctx, key, field, string(data)); err != nil {
+		return fmt.Errorf("保存跳过配置失败: %w", err)
+	}
+
+	s.logger.Debug("跳过配置已保存",
+		zap.String("user", username),
+		zap.String("source", source),
+		zap.String("vod_id", vodID),
+	)
+
+	return nil
+}
+
+// DeleteSkipConfig 删除跳过配置
+func (s *storageService) DeleteSkipConfig(ctx context.Context, username string, source string, vodID string) error {
+	key := generateKey("skip", username)
+	field := source + "+" + vodID
+
+	if err := s.redis.HDel(ctx, key, field); err != nil {
+		return fmt.Errorf("删除跳过配置失败: %w", err)
+	}
+
+	s.logger.Debug("跳过配置已删除",
+		zap.String("user", username),
+		zap.String("source", source),
+		zap.String("vod_id", vodID),
+	)
+
+	return nil
+}
+
+// GetAllSkipConfigs 获取所有跳过配置
+func (s *storageService) GetAllSkipConfigs(ctx context.Context, username string) (map[string]*model.SkipConfig, error) {
+	key := generateKey("skip", username)
+
+	data, err := s.redis.HGetAll(ctx, key)
+	if err != nil {
+		return nil, fmt.Errorf("获取跳过配置列表失败: %w", err)
+	}
+
+	configs := make(map[string]*model.SkipConfig)
+	for field, value := range data {
+		var config model.SkipConfig
+		if err := json.Unmarshal([]byte(value), &config); err != nil {
+			s.logger.Warn("解析跳过配置失败", zap.Error(err))
+			continue
+		}
+		configs[field] = &config
+	}
+
+	return configs, nil
 }
 
 // ---------- 用户相关 ----------
@@ -303,5 +402,3 @@ func (s *storageService) DeleteUser(ctx context.Context, username string) error 
 	key := generateKey("user", username)
 	return s.redis.Del(ctx, key)
 }
-
-

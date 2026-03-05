@@ -1,8 +1,23 @@
 /** @type {import('next').NextConfig} */
 /* eslint-disable @typescript-eslint/no-var-requires */
 
+// 判断使用哪种模式
+// 1. standalone: Next.js 服务器 + Go 后端 (推荐用于 Docker)
+// 2. export: 纯静态文件 (需要所有 API 路由在 Go 后端)
+const isStaticExport = process.env.EXPORT_MODE === 'true';
+const apiProxyTarget =
+  process.env.API_BASE_URL ||
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  'http://api:8080';
+
 const nextConfig = {
-  output: 'standalone',
+  // 使用 standalone 模式用于 Docker 部署
+  output: isStaticExport ? 'export' : 'standalone',
+  distDir: isStaticExport ? 'dist' : '.next',
+
+  // 静态导出时的 trailingSlash
+  trailingSlash: isStaticExport,
+
   eslint: {
     dirs: ['src'],
   },
@@ -14,9 +29,9 @@ const nextConfig = {
     instrumentationHook: process.env.NODE_ENV === 'production',
   },
 
-  // Uncoment to add domain whitelist
+  // 图片配置
   images: {
-    unoptimized: true,
+    unoptimized: isStaticExport,
     remotePatterns: [
       {
         protocol: 'https',
@@ -27,6 +42,24 @@ const nextConfig = {
         hostname: '**',
       },
     ],
+  },
+
+  // 环境变量 (前端可用)
+  env: {
+    NEXT_PUBLIC_API_BASE_URL: process.env.NEXT_PUBLIC_API_BASE_URL || '',
+  },
+
+  // 重写 API 请求到 Go 后端 (仅用于 standalone 模式)
+  async rewrites() {
+    if (isStaticExport) {
+      return [];
+    }
+    return [
+      {
+        source: '/api/:path*',
+        destination: `${apiProxyTarget}/api/:path*`,
+      },
+    ];
   },
 
   webpack(config) {
@@ -71,7 +104,7 @@ const nextConfig = {
 
 const withPWA = require('next-pwa')({
   dest: 'public',
-  disable: process.env.NODE_ENV === 'development',
+  disable: process.env.NODE_ENV === 'development' || !isStaticExport,
   register: true,
   skipWaiting: true,
 });

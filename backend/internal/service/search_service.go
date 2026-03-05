@@ -8,12 +8,12 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/JoyMod/ManboTV/backend/internal/config"
 	"github.com/JoyMod/ManboTV/backend/internal/model"
@@ -25,18 +25,77 @@ type SearchService interface {
 	SearchSingle(ctx context.Context, site model.ApiSite, query string) ([]model.SearchResult, error)
 }
 
+type searchCacheEntry struct {
+	Results   []model.SearchResult
+	ExpiresAt time.Time
+}
+
+type sourceSearchResult struct {
+	Site    model.ApiSite
+	Results []model.SearchResult
+	Err     error
+}
+
 // searchService 搜索服务实现
 type searchService struct {
-	client     *http.Client
-	config     *config.SearchConfig
-	logger     *zap.Logger
-	maxRetries int
+	client          *http.Client
+	config          *config.SearchConfig
+	logger          *zap.Logger
+	maxRetries      int
+	sourceTimeout   time.Duration
+	fastReturnAfter time.Duration
+	cacheTTL        time.Duration
+	cacheMaxEntries int
+
+	cacheMu sync.RWMutex
+	cache   map[string]searchCacheEntry
 }
+
+const (
+	defaultSearchTimeout         = 10 * time.Second
+	defaultSourceTimeout         = 2 * time.Second
+	defaultFastReturnAfter       = 1200 * time.Millisecond
+	defaultSearchRetryTimes      = 2
+	defaultSearchCacheMaxEntries = 512
+)
 
 // NewSearchService 创建搜索服务
 func NewSearchService(cfg *config.SearchConfig, httpCfg *config.HTTPClientConfig, logger *zap.Logger) SearchService {
+	if cfg == nil {
+		cfg = &config.SearchConfig{}
+	}
+	if httpCfg == nil {
+		httpCfg = &config.HTTPClientConfig{}
+	}
+
+	searchTimeout := cfg.Timeout
+	if searchTimeout <= 0 {
+		searchTimeout = defaultSearchTimeout
+	}
+
+	sourceTimeout := cfg.SourceTimeout
+	if sourceTimeout <= 0 {
+		sourceTimeout = defaultSourceTimeout
+	}
+	if sourceTimeout > searchTimeout {
+		sourceTimeout = searchTimeout
+	}
+
+	fastReturnAfter := cfg.FastReturnAfter
+	if fastReturnAfter <= 0 {
+		fastReturnAfter = defaultFastReturnAfter
+	}
+	if fastReturnAfter > sourceTimeout {
+		fastReturnAfter = sourceTimeout
+	}
+
+	cacheTTL := time.Duration(cfg.CacheMinutes) * time.Minute
+	if cfg.CacheMinutes <= 0 {
+		cacheTTL = 0
+	}
+
 	client := &http.Client{
-		Timeout: cfg.Timeout,
+		Timeout: searchTimeout,
 		Transport: &http.Transport{
 			MaxIdleConns:        httpCfg.MaxIdleConns,
 			MaxIdleConnsPerHost: httpCfg.MaxIdleConnsPerHost,
@@ -45,51 +104,152 @@ func NewSearchService(cfg *config.SearchConfig, httpCfg *config.HTTPClientConfig
 	}
 
 	return &searchService{
-		client:     client,
-		config:     cfg,
-		logger:     logger,
-		maxRetries: 3,
+		client:          client,
+		config:          cfg,
+		logger:          logger,
+		maxRetries:      defaultSearchRetryTimes,
+		sourceTimeout:   sourceTimeout,
+		fastReturnAfter: fastReturnAfter,
+		cacheTTL:        cacheTTL,
+		cacheMaxEntries: defaultSearchCacheMaxEntries,
+		cache:           make(map[string]searchCacheEntry, defaultSearchCacheMaxEntries),
 	}
 }
 
 // Search 多源聚合搜索
 func (s *searchService) Search(ctx context.Context, query string, sites []model.ApiSite) ([]model.SearchResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, s.config.Timeout)
-	defer cancel()
-
-	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(s.config.MaxConcurrent)
-
-	var mu sync.Mutex
-	var results []model.SearchResult
-
-	for _, site := range sites {
-		site := site // 捕获循环变量
-		g.Go(func() error {
-			res, err := s.searchSingle(ctx, site, query)
-			if err != nil {
-				s.logger.Warn("搜索源失败",
-					zap.String("source", site.Name),
-					zap.Error(err),
-				)
-				return nil // 单个源失败不影响整体
-			}
-
-			mu.Lock()
-			results = append(results, res...)
-			mu.Unlock()
-			return nil
-		})
+	query = strings.TrimSpace(query)
+	if query == "" || len(sites) == 0 {
+		return []model.SearchResult{}, nil
 	}
 
-	if err := g.Wait(); err != nil {
-		s.logger.Error("聚合搜索失败", zap.Error(err))
-		return nil, fmt.Errorf("聚合搜索失败: %w", err)
+	cacheKey := s.buildCacheKey(query, sites)
+	if cached, ok := s.getCachedResults(cacheKey); ok {
+		s.logger.Debug("搜索缓存命中",
+			zap.String("query", query),
+			zap.Int("source_count", len(sites)),
+			zap.Int("result_count", len(cached)),
+		)
+		return cached, nil
+	}
+
+	searchCtx, cancel := context.WithTimeout(ctx, s.resolveSearchTimeout())
+	defer cancel()
+
+	resultCh := make(chan sourceSearchResult, len(sites))
+	sem := make(chan struct{}, s.resolveMaxConcurrent())
+
+	var wg sync.WaitGroup
+	for _, site := range sites {
+		site := site
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			select {
+			case sem <- struct{}{}:
+			case <-searchCtx.Done():
+				return
+			}
+			defer func() { <-sem }()
+
+			sourceCtx := searchCtx
+			release := func() {}
+			if s.sourceTimeout > 0 {
+				sourceCtx, release = context.WithTimeout(searchCtx, s.sourceTimeout)
+			}
+			defer release()
+
+			res, err := s.searchSingle(sourceCtx, site, query)
+			select {
+			case resultCh <- sourceSearchResult{Site: site, Results: res, Err: err}:
+			case <-searchCtx.Done():
+			}
+		}()
+	}
+
+	go func() {
+		wg.Wait()
+		close(resultCh)
+	}()
+
+	fastTimer := time.NewTimer(s.fastReturnAfter)
+	defer fastTimer.Stop()
+
+	results := make([]model.SearchResult, 0)
+	completed := 0
+	degraded := false
+
+COLLECT:
+	for {
+		select {
+		case item, ok := <-resultCh:
+			if !ok {
+				break COLLECT
+			}
+			completed++
+			if item.Err != nil {
+				s.logger.Warn("搜索源失败",
+					zap.String("source", item.Site.Name),
+					zap.Error(item.Err),
+				)
+				continue
+			}
+			results = append(results, item.Results...)
+
+		case <-fastTimer.C:
+			// 快源优先：如果已有部分源完成，直接降级返回，避免被慢源拖尾
+			if completed > 0 && completed < len(sites) {
+				degraded = true
+				cancel()
+				break COLLECT
+			}
+
+		case <-searchCtx.Done():
+			degraded = completed < len(sites)
+			break COLLECT
+		}
+	}
+
+	// 尽量吸收已完成但尚未消费的结果，不阻塞返回
+	for {
+		select {
+		case item, ok := <-resultCh:
+			if !ok {
+				goto DONE
+			}
+			completed++
+			if item.Err != nil {
+				s.logger.Warn("搜索源失败",
+					zap.String("source", item.Site.Name),
+					zap.Error(item.Err),
+				)
+				continue
+			}
+			results = append(results, item.Results...)
+		default:
+			goto DONE
+		}
+	}
+
+DONE:
+	if s.cacheTTL > 0 {
+		s.setCachedResults(cacheKey, results)
+	}
+
+	if degraded {
+		s.logger.Warn("搜索降级返回",
+			zap.String("query", query),
+			zap.Int("completed_sources", completed),
+			zap.Int("total_sources", len(sites)),
+			zap.Int("result_count", len(results)),
+		)
 	}
 
 	s.logger.Info("搜索完成",
 		zap.String("query", query),
 		zap.Int("source_count", len(sites)),
+		zap.Int("completed_sources", completed),
 		zap.Int("result_count", len(results)),
 	)
 
@@ -98,6 +258,11 @@ func (s *searchService) Search(ctx context.Context, query string, sites []model.
 
 // SearchSingle 单源搜索
 func (s *searchService) SearchSingle(ctx context.Context, site model.ApiSite, query string) ([]model.SearchResult, error) {
+	if s.sourceTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.sourceTimeout)
+		defer cancel()
+	}
 	return s.searchSingle(ctx, site, query)
 }
 
@@ -262,6 +427,106 @@ func (s *searchService) extractYear(year string) string {
 	return "unknown"
 }
 
+func (s *searchService) resolveSearchTimeout() time.Duration {
+	if s.config == nil || s.config.Timeout <= 0 {
+		return defaultSearchTimeout
+	}
+	return s.config.Timeout
+}
+
+func (s *searchService) resolveMaxConcurrent() int {
+	if s.config == nil || s.config.MaxConcurrent <= 0 {
+		return 1
+	}
+	return s.config.MaxConcurrent
+}
+
+func (s *searchService) buildCacheKey(query string, sites []model.ApiSite) string {
+	keys := make([]string, 0, len(sites))
+	for _, site := range sites {
+		key := strings.TrimSpace(site.Key)
+		if key != "" {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+
+	return strings.ToLower(strings.TrimSpace(query)) + "|" + strings.Join(keys, ",")
+}
+
+func (s *searchService) getCachedResults(cacheKey string) ([]model.SearchResult, bool) {
+	if s.cacheTTL <= 0 {
+		return nil, false
+	}
+
+	now := time.Now()
+
+	s.cacheMu.RLock()
+	entry, ok := s.cache[cacheKey]
+	s.cacheMu.RUnlock()
+	if !ok {
+		return nil, false
+	}
+
+	if now.After(entry.ExpiresAt) {
+		s.cacheMu.Lock()
+		if stale, exists := s.cache[cacheKey]; exists && now.After(stale.ExpiresAt) {
+			delete(s.cache, cacheKey)
+		}
+		s.cacheMu.Unlock()
+		return nil, false
+	}
+
+	return cloneSearchResults(entry.Results), true
+}
+
+func (s *searchService) setCachedResults(cacheKey string, results []model.SearchResult) {
+	if s.cacheTTL <= 0 {
+		return
+	}
+
+	now := time.Now()
+
+	s.cacheMu.Lock()
+	s.cache[cacheKey] = searchCacheEntry{
+		Results:   cloneSearchResults(results),
+		ExpiresAt: now.Add(s.cacheTTL),
+	}
+	s.cleanupCacheLocked(now)
+	s.cacheMu.Unlock()
+}
+
+func (s *searchService) cleanupCacheLocked(now time.Time) {
+	for key, entry := range s.cache {
+		if now.After(entry.ExpiresAt) {
+			delete(s.cache, key)
+		}
+	}
+
+	if len(s.cache) <= s.cacheMaxEntries {
+		return
+	}
+
+	overflow := len(s.cache) - s.cacheMaxEntries
+	for key := range s.cache {
+		delete(s.cache, key)
+		overflow--
+		if overflow <= 0 {
+			break
+		}
+	}
+}
+
+func cloneSearchResults(results []model.SearchResult) []model.SearchResult {
+	cloned := make([]model.SearchResult, len(results))
+	for i := range results {
+		cloned[i] = results[i]
+		cloned[i].Episodes = append([]string(nil), results[i].Episodes...)
+		cloned[i].EpisodesTitles = append([]string(nil), results[i].EpisodesTitles...)
+	}
+	return cloned
+}
+
 // withRetry 带重试的执行
 func (s *searchService) withRetry(ctx context.Context, fn func() error) error {
 	var err error
@@ -270,14 +535,39 @@ func (s *searchService) withRetry(ctx context.Context, fn func() error) error {
 			return nil
 		}
 
+		if !s.shouldRetry(err) {
+			return err
+		}
+
 		if i < s.maxRetries-1 {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-time.After(time.Duration(i+1) * time.Second):
-				// 指数退避
+			case <-time.After(time.Duration(i+1) * 200 * time.Millisecond):
 			}
 		}
 	}
 	return err
+}
+
+func (s *searchService) shouldRetry(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	message := err.Error()
+	if strings.Contains(message, "解析JSON失败") || strings.Contains(message, "API错误") {
+		return false
+	}
+
+	if strings.HasPrefix(message, "HTTP ") {
+		statusCode := 0
+		if _, scanErr := fmt.Sscanf(message, "HTTP %d", &statusCode); scanErr == nil {
+			if statusCode >= 400 && statusCode < 500 && statusCode != http.StatusRequestTimeout && statusCode != http.StatusTooManyRequests {
+				return false
+			}
+		}
+	}
+
+	return true
 }

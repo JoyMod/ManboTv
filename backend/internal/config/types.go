@@ -50,19 +50,21 @@ type RedisConfig struct {
 
 // SearchConfig 搜索配置
 type SearchConfig struct {
-	Timeout              time.Duration `mapstructure:"timeout"`
-	MaxConcurrent        int           `mapstructure:"max_concurrent"`
-	CacheMinutes         int           `mapstructure:"cache_minutes"`
-	MaxResultsPerSource  int           `mapstructure:"max_results_per_source"`
-	MaxPages             int           `mapstructure:"max_pages"`
+	Timeout             time.Duration `mapstructure:"timeout"`
+	MaxConcurrent       int           `mapstructure:"max_concurrent"`
+	SourceTimeout       time.Duration `mapstructure:"source_timeout"`
+	FastReturnAfter     time.Duration `mapstructure:"fast_return_after"`
+	CacheMinutes        int           `mapstructure:"cache_minutes"`
+	MaxResultsPerSource int           `mapstructure:"max_results_per_source"`
+	MaxPages            int           `mapstructure:"max_pages"`
 }
 
 // ImageProxyConfig 图片代理配置
 type ImageProxyConfig struct {
-	Timeout         time.Duration `mapstructure:"timeout"`
-	CacheSize       int           `mapstructure:"cache_size"`
-	CacheMaxItemSize int64        `mapstructure:"cache_max_item_size"`
-	UserAgent       string        `mapstructure:"user_agent"`
+	Timeout          time.Duration `mapstructure:"timeout"`
+	CacheSize        int           `mapstructure:"cache_size"`
+	CacheMaxItemSize int64         `mapstructure:"cache_max_item_size"`
+	UserAgent        string        `mapstructure:"user_agent"`
 }
 
 // HTTPClientConfig HTTP客户端配置

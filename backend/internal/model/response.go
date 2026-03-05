@@ -24,14 +24,15 @@ type PaginatedResponse struct {
 
 // 响应码常量
 const (
-	CodeSuccess         = 0
-	CodeError           = 1
-	CodeInvalidParams   = 400
-	CodeUnauthorized    = 401
-	CodeForbidden       = 403
-	CodeNotFound        = 404
-	CodeTooManyRequests = 429
-	CodeInternalError   = 500
+	CodeSuccess            = 0
+	CodeError              = 1
+	CodeInvalidParams      = 400
+	CodeUnauthorized       = 401
+	CodePermissionDenied   = 403
+	CodeForbidden          = 403
+	CodeNotFound           = 404
+	CodeTooManyRequests    = 429
+	CodeInternalError      = 500
 	CodeServiceUnavailable = 503
 )
 

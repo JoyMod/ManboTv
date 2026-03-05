@@ -10,7 +10,7 @@ import { CURRENT_VERSION } from '@/lib/version';
 import { checkForUpdates, UpdateStatus } from '@/lib/version_check';
 
 import { useSite } from '@/components/SiteProvider';
-import { ThemeToggle } from '@/components/ThemeToggle';
+import Logo from '@/components/ui/Logo';
 
 // 版本显示组件
 function VersionDisplay() {
@@ -37,15 +37,15 @@ function VersionDisplay() {
       onClick={() =>
         window.open('https://github.com/MoonTechLab/LunaTV', '_blank')
       }
-      className='absolute bottom-4 left-1/2 transform -translate-x-1/2 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 transition-colors cursor-pointer'
+      className='fixed bottom-4 left-1/2 transform -translate-x-1/2 flex items-center gap-2 text-xs text-gray-500 transition-colors cursor-pointer hover:text-gray-300'
     >
       <span className='font-mono'>v{CURRENT_VERSION}</span>
       {!isChecking && updateStatus !== UpdateStatus.FETCH_FAILED && (
         <div
           className={`flex items-center gap-1.5 ${updateStatus === UpdateStatus.HAS_UPDATE
-            ? 'text-yellow-600 dark:text-yellow-400'
+            ? 'text-yellow-400'
             : updateStatus === UpdateStatus.NO_UPDATE
-              ? 'text-green-600 dark:text-green-400'
+              ? 'text-green-400'
               : ''
             }`}
         >
@@ -75,8 +75,6 @@ function LoginPageClient() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [shouldAskUsername, setShouldAskUsername] = useState(false);
-
-  const { siteName } = useSite();
 
   // 在客户端挂载后设置配置
   useEffect(() => {
@@ -119,66 +117,101 @@ function LoginPageClient() {
     }
   };
 
-
-
   return (
-    <div className='relative min-h-screen flex items-center justify-center px-4 overflow-hidden'>
-      <div className='absolute top-4 right-4'>
-        <ThemeToggle />
+    <div className="min-h-screen bg-[#141414] flex flex-col">
+      {/* 顶部 Logo */}
+      <div className="absolute top-0 left-0 right-0 p-6">
+        <div className="max-w-[1920px] mx-auto">
+          <Logo size="lg" />
+        </div>
       </div>
-      <div className='relative z-10 w-full max-w-md rounded-3xl bg-gradient-to-b from-white/90 via-white/70 to-white/40 dark:from-zinc-900/90 dark:via-zinc-900/70 dark:to-zinc-900/40 backdrop-blur-xl shadow-2xl p-10 dark:border dark:border-zinc-800'>
-        <h1 className='text-green-600 tracking-tight text-center text-3xl font-extrabold mb-8 bg-clip-text drop-shadow-sm'>
-          {siteName}
-        </h1>
-        <form onSubmit={handleSubmit} className='space-y-8'>
-          {shouldAskUsername && (
+
+      {/* 背景渐变 */}
+      <div className="absolute inset-0 overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-[#141414]/80 to-[#141414]" />
+        <div className="absolute top-0 left-0 right-0 h-[70vh] bg-gradient-to-b from-black/80 to-transparent" />
+      </div>
+
+      {/* 登录框 */}
+      <div className="relative flex-1 flex items-center justify-center px-4 py-20">
+        <div className="w-full max-w-md bg-black/70 backdrop-blur-sm rounded-lg p-8 md:p-12">
+          <h1 className="text-3xl font-bold text-white mb-8">登录</h1>
+          
+          <form onSubmit={handleSubmit} className="space-y-6">
+            {shouldAskUsername && (
+              <div>
+                <input
+                  id="username"
+                  type="text"
+                  autoComplete="username"
+                  className="w-full px-4 py-4 bg-[#333] border border-[#333] rounded text-white placeholder-gray-500 focus:outline-none focus:border-[#E50914] transition-colors"
+                  placeholder="用户名"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                />
+              </div>
+            )}
+
             <div>
-              <label htmlFor='username' className='sr-only'>
-                用户名
-              </label>
               <input
-                id='username'
-                type='text'
-                autoComplete='username'
-                className='block w-full rounded-lg border-0 py-3 px-4 text-gray-900 dark:text-gray-100 shadow-sm ring-1 ring-white/60 dark:ring-white/20 placeholder:text-gray-500 dark:placeholder:text-gray-400 focus:ring-2 focus:ring-green-500 focus:outline-none sm:text-base bg-white/60 dark:bg-zinc-800/60 backdrop-blur'
-                placeholder='输入用户名'
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                id="password"
+                type="password"
+                autoComplete="current-password"
+                className="w-full px-4 py-4 bg-[#333] border border-[#333] rounded text-white placeholder-gray-500 focus:outline-none focus:border-[#E50914] transition-colors"
+                placeholder="密码"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
               />
             </div>
-          )}
 
-          <div>
-            <label htmlFor='password' className='sr-only'>
-              密码
-            </label>
-            <input
-              id='password'
-              type='password'
-              autoComplete='current-password'
-              className='block w-full rounded-lg border-0 py-3 px-4 text-gray-900 dark:text-gray-100 shadow-sm ring-1 ring-white/60 dark:ring-white/20 placeholder:text-gray-500 dark:placeholder:text-gray-400 focus:ring-2 focus:ring-green-500 focus:outline-none sm:text-base bg-white/60 dark:bg-zinc-800/60 backdrop-blur'
-              placeholder='输入访问密码'
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
+            {error && (
+              <div className="flex items-center gap-2 text-[#E50914] text-sm">
+                <AlertCircle className="w-4 h-4" />
+                {error}
+              </div>
+            )}
+
+            {/* 登录按钮 */}
+            <button
+              type="submit"
+              disabled={!password || loading || (shouldAskUsername && !username)}
+              className="w-full py-4 bg-[#E50914] text-white font-bold rounded hover:bg-[#f40612] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {loading ? '登录中...' : '登录'}
+            </button>
+
+            <div className="flex items-center justify-between text-sm text-gray-400">
+              <label className="flex items-center gap-2 cursor-pointer hover:text-gray-300">
+                <input type="checkbox" className="rounded bg-[#333] border-[#333]" />
+                记住我
+              </label>
+              <a href="#" className="hover:underline">需要帮助?</a>
+            </div>
+          </form>
+
+          <div className="mt-8 text-gray-400 text-sm">
+            <p>
+              首次使用? <a href="#" className="text-white hover:underline">免费注册</a>
+            </p>
+            <p className="mt-4 text-xs">
+              登录即表示您同意我们的 <a href="#" className="text-blue-400 hover:underline">使用条款</a> 和 <a href="#" className="text-blue-400 hover:underline">隐私声明</a>。
+            </p>
           </div>
-
-          {error && (
-            <p className='text-sm text-red-600 dark:text-red-400'>{error}</p>
-          )}
-
-          {/* 登录按钮 */}
-          <button
-            type='submit'
-            disabled={
-              !password || loading || (shouldAskUsername && !username)
-            }
-            className='inline-flex w-full justify-center rounded-lg bg-green-600 py-3 text-base font-semibold text-white shadow-lg transition-all duration-200 hover:from-green-600 hover:to-blue-600 disabled:cursor-not-allowed disabled:opacity-50'
-          >
-            {loading ? '登录中...' : '登录'}
-          </button>
-        </form>
+        </div>
       </div>
+
+      {/* 页脚 */}
+      <footer className="relative py-8 px-4 bg-black/50">
+        <div className="max-w-[1920px] mx-auto">
+          <p className="text-gray-500 text-sm mb-4">有问题? 请联系我们</p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs text-gray-500">
+            <a href="#" className="hover:underline">常见问题</a>
+            <a href="#" className="hover:underline">帮助中心</a>
+            <a href="#" className="hover:underline">使用条款</a>
+            <a href="#" className="hover:underline">隐私政策</a>
+          </div>
+        </div>
+      </footer>
 
       {/* 版本信息显示 */}
       <VersionDisplay />
@@ -188,7 +221,7 @@ function LoginPageClient() {
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={<div>Loading...</div>}>
+    <Suspense fallback={<div className="min-h-screen bg-[#141414] flex items-center justify-center text-white">加载中...</div>}>
       <LoginPageClient />
     </Suspense>
   );

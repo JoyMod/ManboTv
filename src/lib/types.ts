@@ -1,5 +1,3 @@
-import { AdminConfig } from './admin.types';
-
 // 播放记录数据结构
 export interface PlayRecord {
   title: string;
@@ -24,65 +22,6 @@ export interface Favorite {
   save_time: number; // 记录保存时间（时间戳）
   search_title: string; // 搜索时使用的标题
   origin?: 'vod' | 'live';
-}
-
-// 存储接口
-export interface IStorage {
-  // 播放记录相关
-  getPlayRecord(userName: string, key: string): Promise<PlayRecord | null>;
-  setPlayRecord(
-    userName: string,
-    key: string,
-    record: PlayRecord
-  ): Promise<void>;
-  getAllPlayRecords(userName: string): Promise<{ [key: string]: PlayRecord }>;
-  deletePlayRecord(userName: string, key: string): Promise<void>;
-
-  // 收藏相关
-  getFavorite(userName: string, key: string): Promise<Favorite | null>;
-  setFavorite(userName: string, key: string, favorite: Favorite): Promise<void>;
-  getAllFavorites(userName: string): Promise<{ [key: string]: Favorite }>;
-  deleteFavorite(userName: string, key: string): Promise<void>;
-
-  // 用户相关
-  registerUser(userName: string, password: string): Promise<void>;
-  verifyUser(userName: string, password: string): Promise<boolean>;
-  // 检查用户是否存在（无需密码）
-  checkUserExist(userName: string): Promise<boolean>;
-  // 修改用户密码
-  changePassword(userName: string, newPassword: string): Promise<void>;
-  // 删除用户（包括密码、搜索历史、播放记录、收藏夹）
-  deleteUser(userName: string): Promise<void>;
-
-  // 搜索历史相关
-  getSearchHistory(userName: string): Promise<string[]>;
-  addSearchHistory(userName: string, keyword: string): Promise<void>;
-  deleteSearchHistory(userName: string, keyword?: string): Promise<void>;
-
-  // 用户列表
-  getAllUsers(): Promise<string[]>;
-
-  // 管理员配置相关
-  getAdminConfig(): Promise<AdminConfig | null>;
-  setAdminConfig(config: AdminConfig): Promise<void>;
-
-  // 跳过片头片尾配置相关
-  getSkipConfig(
-    userName: string,
-    source: string,
-    id: string
-  ): Promise<SkipConfig | null>;
-  setSkipConfig(
-    userName: string,
-    source: string,
-    id: string,
-    config: SkipConfig
-  ): Promise<void>;
-  deleteSkipConfig(userName: string, source: string, id: string): Promise<void>;
-  getAllSkipConfigs(userName: string): Promise<{ [key: string]: SkipConfig }>;
-
-  // 数据清理相关
-  clearAllData(): Promise<void>;
 }
 
 // 搜索结果数据结构
