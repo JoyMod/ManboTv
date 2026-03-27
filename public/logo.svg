@@ -1,45 +1,27 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 40">
-  <!-- 背景 -->
-  <rect width="120" height="40" rx="8" fill="#141414"/>
-  
-  <!-- 播放按钮融合 M 字母 -->
-  <g transform="translate(8, 8)">
-    <!-- M 的左半部分 -->
+<svg
+  width="220"
+  height="72"
+  viewBox="0 0 220 72"
+  fill="none"
+  xmlns="http://www.w3.org/2000/svg"
+>
+  <rect width="220" height="72" rx="18" fill="#050505" />
+  <g transform="translate(16 18)">
     <path
-      d="M4 20 L10 4 L16 20"
-      stroke="#E50914"
-      stroke-width="4"
-      fill="none"
-      stroke-linecap="round"
-      stroke-linejoin="round"
+      d="M0 28L6 0H12L20 16L28 0H34L40 28H32L29 12L20 28L11 12L8 28H0Z"
+      fill="#ED1C24"
     />
-    <!-- 播放三角形 -->
-    <polygon
-      points="14,8 22,14 14,20"
-      fill="#E50914"
-    />
+    <path d="M24 14L32 8L32 20L24 14Z" fill="#ED1C24" />
   </g>
-  
-  <!-- 文字部分 -->
   <text
-    x="38"
-    y="26"
-    font-size="16"
+    x="56"
+    y="39"
     fill="white"
-    font-weight="800"
-    font-family="system-ui, -apple-system, sans-serif"
-    letter-spacing="0.5"
+    font-family="Arial, Helvetica, sans-serif"
+    font-size="26"
+    font-weight="700"
   >
-    曼波TV
+    ManboTV
   </text>
-  
-  <!-- 下划线装饰 -->
-  <rect
-    x="38"
-    y="30"
-    width="60"
-    height="3"
-    rx="1.5"
-    fill="#E50914"
-  />
+  <rect x="56" y="46" width="92" height="4" rx="2" fill="#ED1C24" />
 </svg>
