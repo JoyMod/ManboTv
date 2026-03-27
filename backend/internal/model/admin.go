@@ -5,6 +5,12 @@ package model
 
 import "context"
 
+const (
+	ContentAccessModeSafe      = "safe"
+	ContentAccessModeMixed     = "mixed"
+	ContentAccessModeAdultOnly = "adult_only"
+)
+
 // VideoSource 视频源配置
 type VideoSource struct {
 	Key      string `json:"key" binding:"required"`
@@ -55,23 +61,25 @@ type UserConfig struct {
 
 // SiteConfig 站点配置
 type SiteConfig struct {
-	SiteName                string `json:"site_name"`
-	Announcement            string `json:"announcement"`
-	SearchDownstreamMaxPage int    `json:"search_downstream_max_page"`
-	SiteInterfaceCacheTime  int    `json:"site_interface_cache_time"`
-	DoubanProxyType         string `json:"douban_proxy_type"`
-	DoubanProxy             string `json:"douban_proxy"`
-	DoubanImageProxyType    string `json:"douban_image_proxy_type"`
-	DoubanImageProxy        string `json:"douban_image_proxy"`
-	DisableYellowFilter     bool   `json:"disable_yellow_filter"`
-	FluidSearch             bool   `json:"fluid_search"`
+	SiteName                string   `json:"site_name"`
+	Announcement            string   `json:"announcement"`
+	SearchDownstreamMaxPage int      `json:"search_downstream_max_page"`
+	SiteInterfaceCacheTime  int      `json:"site_interface_cache_time"`
+	DoubanProxyType         string   `json:"douban_proxy_type"`
+	DoubanProxy             string   `json:"douban_proxy"`
+	DoubanImageProxyType    string   `json:"douban_image_proxy_type"`
+	DoubanImageProxy        string   `json:"douban_image_proxy"`
+	DisableYellowFilter     bool     `json:"disable_yellow_filter"`
+	FluidSearch             bool     `json:"fluid_search"`
+	ContentAccessMode       string   `json:"content_access_mode,omitempty"`
+	BlockedContentTags      []string `json:"blocked_content_tags,omitempty"`
 }
 
 // ConfigSubscription 配置订阅
 type ConfigSubscription struct {
-	URL       string `json:"url,omitempty"`
-	AutoUpdate bool  `json:"auto_update,omitempty"`
-	LastCheck string `json:"last_check,omitempty"`
+	URL        string `json:"url,omitempty"`
+	AutoUpdate bool   `json:"auto_update,omitempty"`
+	LastCheck  string `json:"last_check,omitempty"`
 }
 
 // AdminConfig 管理员配置总结构
@@ -115,12 +123,12 @@ type AdminStorageService interface {
 
 // AdminStats 管理员统计数据
 type AdminStats struct {
-	TotalUsers      int64 `json:"total_users"`
-	TotalFavorites  int64 `json:"total_favorites"`
-	TotalRecords    int64 `json:"total_records"`
-	VideoSources    int   `json:"video_sources"`
-	LiveSources     int   `json:"live_sources"`
-	CustomCategories int  `json:"custom_categories"`
+	TotalUsers       int64 `json:"total_users"`
+	TotalFavorites   int64 `json:"total_favorites"`
+	TotalRecords     int64 `json:"total_records"`
+	VideoSources     int   `json:"video_sources"`
+	LiveSources      int   `json:"live_sources"`
+	CustomCategories int   `json:"custom_categories"`
 }
 
 // ExportData 导出数据结构

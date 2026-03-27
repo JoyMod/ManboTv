@@ -24,28 +24,23 @@ type M3U8ProxyService interface {
 
 // m3u8ProxyService M3U8代理服务实现
 type m3u8ProxyService struct {
-	client    *http.Client
-	logger    *zap.Logger
-	timeout   time.Duration
-	userAgent string
+	client         *http.Client
+	insecureClient *http.Client
+	logger         *zap.Logger
+	timeout        time.Duration
+	userAgent      string
 }
 
 // NewM3U8ProxyService 创建M3U8代理服务
 func NewM3U8ProxyService(cfg *config.HTTPClientConfig, logger *zap.Logger) M3U8ProxyService {
-	client := &http.Client{
-		Timeout: cfg.Timeout,
-		Transport: &http.Transport{
-			MaxIdleConns:        cfg.MaxIdleConns,
-			MaxIdleConnsPerHost: cfg.MaxIdleConnsPerHost,
-			IdleConnTimeout:     cfg.IdleConnTimeout,
-		},
-	}
+	client, insecureClient := buildHTTPClients(cfg)
 
 	return &m3u8ProxyService{
-		client:    client,
-		logger:    logger,
-		timeout:   cfg.Timeout,
-		userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+		client:         client,
+		insecureClient: insecureClient,
+		logger:         logger,
+		timeout:        client.Timeout,
+		userAgent:      "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
 	}
 }
 
@@ -89,6 +84,11 @@ func (s *m3u8ProxyService) fetchM3U8(ctx context.Context, targetURL string) (str
 	req.Header.Set("Accept", "*/*")
 
 	resp, err := s.client.Do(req)
+	if err != nil {
+		if shouldRetryWithoutTLSVerify(err) {
+			resp, err = s.insecureClient.Do(req)
+		}
+	}
 	if err != nil {
 		return "", "", fmt.Errorf("请求失败: %w", err)
 	}

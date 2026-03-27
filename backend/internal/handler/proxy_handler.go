@@ -2,6 +2,7 @@
 package handler
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -45,7 +46,7 @@ func NewProxyHandler(
 func (h *ProxyHandler) ProxyM3U8(c *gin.Context) {
 	targetURL := c.Query("url")
 	if targetURL == "" {
-		c.JSON(http.StatusOK, model.Error(model.CodeInvalidParams, "缺少URL参数"))
+		c.JSON(http.StatusBadRequest, model.Error(model.CodeInvalidParams, "缺少URL参数"))
 		return
 	}
 
@@ -66,7 +67,7 @@ func (h *ProxyHandler) ProxyM3U8(c *gin.Context) {
 			zap.String("url", targetURL),
 			zap.Error(err),
 		)
-		c.JSON(http.StatusOK, model.Error(model.CodeInternalError, "获取M3U8失败"))
+		c.JSON(http.StatusBadGateway, model.Error(model.CodeInternalError, "获取M3U8失败"))
 		return
 	}
 
@@ -86,7 +87,7 @@ func (h *ProxyHandler) ProxyM3U8(c *gin.Context) {
 func (h *ProxyHandler) ProxySegment(c *gin.Context) {
 	targetURL := c.Query("url")
 	if targetURL == "" {
-		c.JSON(http.StatusOK, model.Error(model.CodeInvalidParams, "缺少URL参数"))
+		c.JSON(http.StatusBadRequest, model.Error(model.CodeInvalidParams, "缺少URL参数"))
 		return
 	}
 
@@ -96,13 +97,15 @@ func (h *ProxyHandler) ProxySegment(c *gin.Context) {
 	)
 
 	// 执行代理
-	resp, err := h.segmentService.ProxySegment(c.Request.Context(), targetURL)
+	rangeHeader := c.GetHeader("Range")
+	resp, err := h.segmentService.ProxySegment(c.Request.Context(), targetURL, rangeHeader)
 	if err != nil {
 		h.logger.Error("片段代理失败",
 			zap.String("url", targetURL),
+			zap.String("range", rangeHeader),
 			zap.Error(err),
 		)
-		c.JSON(http.StatusOK, model.Error(model.CodeInternalError, "获取视频片段失败"))
+		c.JSON(http.StatusBadGateway, model.Error(model.CodeInternalError, "获取视频片段失败"))
 		return
 	}
 	defer resp.Body.Close()
@@ -118,13 +121,26 @@ func (h *ProxyHandler) ProxySegment(c *gin.Context) {
 	if resp.ContentLength > 0 {
 		c.Header("Content-Length", strconv.FormatInt(resp.ContentLength, 10))
 	}
+	if resp.ContentRange != "" {
+		c.Header("Content-Range", resp.ContentRange)
+	}
 	if resp.AcceptRanges != "" {
 		c.Header("Accept-Ranges", resp.AcceptRanges)
 	}
 
 	// 流式传输
-	c.Status(http.StatusOK)
-	io.Copy(c.Writer, resp.Body)
+	statusCode := resp.StatusCode
+	if statusCode == 0 {
+		statusCode = http.StatusOK
+	}
+	c.Status(statusCode)
+	if _, copyErr := io.Copy(c.Writer, resp.Body); copyErr != nil {
+		h.logger.Warn("片段流式传输中断",
+			zap.String("url", targetURL),
+			zap.String("range", rangeHeader),
+			zap.Error(copyErr),
+		)
+	}
 }
 
 func resolveLegacyProxyBase(c *gin.Context) string {
@@ -228,7 +244,7 @@ func (h *ProxyHandler) ProxyKey(c *gin.Context) {
 func (h *ProxyHandler) ProxyLogo(c *gin.Context) {
 	targetURL := c.Query("url")
 	if targetURL == "" {
-		c.JSON(http.StatusOK, model.Error(model.CodeInvalidParams, "缺少URL参数"))
+		c.Redirect(http.StatusFound, "/placeholder-poster.svg")
 		return
 	}
 
@@ -240,41 +256,79 @@ func (h *ProxyHandler) ProxyLogo(c *gin.Context) {
 	// 解码URL
 	decodedURL, err := url.QueryUnescape(targetURL)
 	if err != nil {
-		c.JSON(http.StatusOK, model.Error(model.CodeInvalidParams, "URL解码失败"))
+		c.Redirect(http.StatusFound, "/placeholder-poster.svg")
 		return
 	}
 
-	// 创建请求
-	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, decodedURL, nil)
-	if err != nil {
-		h.logger.Error("创建请求失败", zap.Error(err))
-		c.JSON(http.StatusOK, model.Error(model.CodeInternalError, "创建请求失败"))
+	decodedURL = strings.TrimSpace(decodedURL)
+	if decodedURL == "" {
+		c.Redirect(http.StatusFound, "/placeholder-poster.svg")
+		return
+	}
+	if strings.HasPrefix(decodedURL, "//") {
+		decodedURL = "https:" + decodedURL
+	}
+	if !strings.HasPrefix(decodedURL, "http://") && !strings.HasPrefix(decodedURL, "https://") {
+		c.Redirect(http.StatusFound, "/placeholder-poster.svg")
 		return
 	}
 
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-	req.Header.Set("Accept", "image/*,*/*")
+	parsedURL, err := url.Parse(decodedURL)
+	if err != nil || parsedURL.Host == "" {
+		c.Redirect(http.StatusFound, "/placeholder-poster.svg")
+		return
+	}
 
-	resp, err := h.httpClient.Do(req)
-	if err != nil {
-		h.logger.Error("Logo请求失败",
-			zap.String("url", decodedURL),
-			zap.Error(err),
-		)
-		c.JSON(http.StatusOK, model.Error(model.CodeInternalError, "获取Logo失败"))
+	primaryReferer := fmt.Sprintf("%s://%s/", parsedURL.Scheme, parsedURL.Host)
+	attempts := []string{decodedURL}
+	if parsedURL.Scheme == "https" {
+		attempts = append(attempts, strings.Replace(decodedURL, "https://", "http://", 1))
+	} else if parsedURL.Scheme == "http" {
+		attempts = append(attempts, strings.Replace(decodedURL, "http://", "https://", 1))
+	}
+
+	var resp *http.Response
+	for _, attemptURL := range attempts {
+		req, reqErr := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, attemptURL, nil)
+		if reqErr != nil {
+			continue
+		}
+
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36")
+		req.Header.Set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
+		req.Header.Set("Referer", primaryReferer)
+		req.Header.Set("Origin", primaryReferer)
+		req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+
+		candidate, doErr := h.httpClient.Do(req)
+		if doErr != nil {
+			h.logger.Debug("Logo请求尝试失败", zap.String("url", attemptURL), zap.Error(doErr))
+			continue
+		}
+
+		if candidate.StatusCode != http.StatusOK {
+			candidate.Body.Close()
+			continue
+		}
+
+		resp = candidate
+		break
+	}
+
+	if resp == nil {
+		c.Redirect(http.StatusFound, "/placeholder-poster.svg")
 		return
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		c.JSON(http.StatusOK, model.Error(model.CodeInternalError, "Logo请求失败"))
-		return
-	}
 
 	// 设置响应头
 	contentType := resp.Header.Get("Content-Type")
 	if contentType == "" {
 		contentType = "image/png"
+	}
+	if strings.Contains(strings.ToLower(contentType), "text/html") {
+		c.Redirect(http.StatusFound, "/placeholder-poster.svg")
+		return
 	}
 
 	c.Header("Content-Type", contentType)

@@ -45,20 +45,7 @@ func (s *adminStorageService) GetAdminConfig(ctx context.Context) (*model.AdminC
 	}
 
 	if data == "" {
-		// 返回默认配置
-		return &model.AdminConfig{
-			SiteConfig: model.SiteConfig{
-				SiteName:                "ManboTV",
-				SearchDownstreamMaxPage: 5,
-				SiteInterfaceCacheTime:  3600,
-				FluidSearch:             true,
-			},
-			VideoSources:     make([]model.VideoSource, 0),
-			LiveSources:      make([]model.LiveSource, 0),
-			CustomCategories: make([]model.CustomCategory, 0),
-			UserConfig:       make([]model.UserConfig, 0),
-			UserGroups:       make([]model.UserGroup, 0),
-		}, nil
+		return newDefaultAdminConfig(), nil
 	}
 
 	var config model.AdminConfig
@@ -66,7 +53,7 @@ func (s *adminStorageService) GetAdminConfig(ctx context.Context) (*model.AdminC
 		return nil, fmt.Errorf("解析配置失败: %w", err)
 	}
 
-	return &config, nil
+	return applyDefaultAdminConfig(&config), nil
 }
 
 // SaveAdminConfig 保存 Admin 配置

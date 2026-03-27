@@ -24,6 +24,24 @@ type AdminHandler struct {
 	ownerPass    string
 }
 
+const (
+	adminStatsProbePage     = 1
+	adminStatsProbePageSize = 1
+)
+
+func appendOwnerIfMissing(users []model.UserConfig, ownerUsername string) []model.UserConfig {
+	for _, user := range users {
+		if user.Username == ownerUsername {
+			return users
+		}
+	}
+
+	return append(users, model.UserConfig{
+		Username: ownerUsername,
+		Role:     model.RoleOwner,
+	})
+}
+
 // NewAdminHandler 创建管理后台处理器
 func NewAdminHandler(
 	storage model.StorageService,
@@ -539,13 +557,39 @@ func (h *AdminHandler) GetDataStatus(c *gin.Context) {
 	// 获取统计数据
 	config, _ := h.adminStorage.GetAdminConfig(ctx)
 	users, _ := h.adminStorage.GetAllUsers(ctx)
+	users = appendOwnerIfMissing(users, h.ownerUser)
 
-	// TODO: 获取收藏和播放记录数量
 	stats := model.AdminStats{
 		TotalUsers:       int64(len(users)),
 		VideoSources:     len(config.VideoSources),
 		LiveSources:      len(config.LiveSources),
 		CustomCategories: len(config.CustomCategories),
+	}
+
+	for _, user := range users {
+		_, favoriteTotal, err := h.storage.GetFavorites(
+			ctx,
+			user.Username,
+			adminStatsProbePage,
+			adminStatsProbePageSize,
+		)
+		if err != nil {
+			h.logger.Warn("获取用户收藏统计失败", zap.String("username", user.Username), zap.Error(err))
+		} else {
+			stats.TotalFavorites += favoriteTotal
+		}
+
+		_, recordTotal, err := h.storage.GetPlayRecords(
+			ctx,
+			user.Username,
+			adminStatsProbePage,
+			adminStatsProbePageSize,
+		)
+		if err != nil {
+			h.logger.Warn("获取用户播放记录统计失败", zap.String("username", user.Username), zap.Error(err))
+			continue
+		}
+		stats.TotalRecords += recordTotal
 	}
 
 	c.JSON(http.StatusOK, model.Success(stats))

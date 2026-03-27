@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -45,6 +47,7 @@ type DoubanItem struct {
 type DoubanResult struct {
 	Code    int          `json:"code"`
 	Message string       `json:"message"`
+	Tag     string       `json:"tag,omitempty"`
 	List    []DoubanItem `json:"list"`
 }
 
@@ -63,6 +66,7 @@ type DoubanApiResponse struct {
 func (h *DoubanHandler) Search(c *gin.Context) {
 	contentType := c.Query("type")
 	tag := c.Query("tag")
+	sort := normalizeDoubanSort(c.DefaultQuery("sort", "recommend"))
 	pageSize := 16
 	pageStart := 0
 
@@ -88,23 +92,31 @@ func (h *DoubanHandler) Search(c *gin.Context) {
 		return
 	}
 
+	resolvedTag := normalizeDoubanTag(contentType, tag)
+
 	h.logger.Debug("豆瓣搜索",
 		zap.String("type", contentType),
 		zap.String("tag", tag),
+		zap.String("resolvedTag", resolvedTag),
+		zap.String("sort", sort),
 		zap.Int("pageSize", pageSize),
 		zap.Int("pageStart", pageStart),
 	)
 
 	// Top250 特殊处理
-	if tag == "top250" {
+	if resolvedTag == "top250" {
 		h.handleTop250(c, pageStart)
 		return
 	}
 
 	// 构建请求 URL
 	target := fmt.Sprintf(
-		"https://movie.douban.com/j/search_subjects?type=%s&tag=%s&sort=recommend&page_limit=%d&page_start=%d",
-		contentType, tag, pageSize, pageStart,
+		"https://movie.douban.com/j/search_subjects?type=%s&tag=%s&sort=%s&page_limit=%d&page_start=%d",
+		url.QueryEscape(contentType),
+		url.QueryEscape(resolvedTag),
+		url.QueryEscape(sort),
+		pageSize,
+		pageStart,
 	)
 
 	// 调用豆瓣 API
@@ -130,6 +142,7 @@ func (h *DoubanHandler) Search(c *gin.Context) {
 	result := DoubanResult{
 		Code:    200,
 		Message: "获取成功",
+		Tag:     resolvedTag,
 		List:    list,
 	}
 
@@ -187,39 +200,155 @@ func (h *DoubanHandler) GetRecommends(c *gin.Context) {
 // GetCategories 豆瓣分类
 // GET /api/v1/douban/categories
 func (h *DoubanHandler) GetCategories(c *gin.Context) {
-	// 返回豆瓣分类列表
-	categories := []gin.H{
-		// 电影分类
-		{"type": "movie", "name": "热门", "key": "热门"},
-		{"type": "movie", "name": "最新", "key": "最新"},
-		{"type": "movie", "name": "经典", "key": "经典"},
-		{"type": "movie", "name": "豆瓣高分", "key": "豆瓣高分"},
-		{"type": "movie", "name": "冷门佳片", "key": "冷门佳片"},
-		{"type": "movie", "name": "华语", "key": "华语"},
-		{"type": "movie", "name": "欧美", "key": "欧美"},
-		{"type": "movie", "name": "韩国", "key": "韩国"},
-		{"type": "movie", "name": "日本", "key": "日本"},
-		{"type": "movie", "name": "动作", "key": "动作"},
-		{"type": "movie", "name": "喜剧", "key": "喜剧"},
-		{"type": "movie", "name": "爱情", "key": "爱情"},
-		{"type": "movie", "name": "科幻", "key": "科幻"},
-		{"type": "movie", "name": "悬疑", "key": "悬疑"},
-		{"type": "movie", "name": "恐怖", "key": "恐怖"},
-		{"type": "movie", "name": "治愈", "key": "治愈"},
-		// 电视剧分类
-		{"type": "tv", "name": "热门", "key": "热门"},
-		{"type": "tv", "name": "美剧", "key": "美剧"},
-		{"type": "tv", "name": "英剧", "key": "英剧"},
-		{"type": "tv", "name": "韩剧", "key": "韩剧"},
-		{"type": "tv", "name": "日剧", "key": "日剧"},
-		{"type": "tv", "name": "国产剧", "key": "国产剧"},
-		{"type": "tv", "name": "港剧", "key": "港剧"},
-		{"type": "tv", "name": "日本动画", "key": "日本动画"},
-		{"type": "tv", "name": "综艺", "key": "综艺"},
-		{"type": "tv", "name": "纪录片", "key": "纪录片"},
+	catalog := buildDoubanFilterCatalog()
+
+	if c.Query("view") == "full" {
+		c.JSON(http.StatusOK, model.Success(catalog))
+		return
 	}
 
-	c.JSON(http.StatusOK, model.Success(categories))
+	c.JSON(http.StatusOK, model.Success(flattenDoubanFilterCatalog(catalog)))
+}
+
+func normalizeDoubanSort(sort string) string {
+	switch strings.TrimSpace(strings.ToLower(sort)) {
+	case "time", "latest", "recent":
+		return "time"
+	case "rank", "rating":
+		return "rank"
+	default:
+		return "recommend"
+	}
+}
+
+func normalizeDoubanTag(contentType, raw string) string {
+	tag := strings.TrimSpace(raw)
+	if tag == "" {
+		if contentType == "movie" {
+			return "热门"
+		}
+		return "热门"
+	}
+
+	movieAlias := map[string]string{
+		"美国":      "欧美",
+		"国产":      "华语",
+		"剧情":      "热门",
+		"豆瓣高分":    "豆瓣高分",
+		"获奖佳作":    "经典",
+		"新片热映":    "最新",
+		"经典重温":    "经典",
+		"90年代":    "经典",
+		"IMAX":    "热门",
+		"4K":      "热门",
+		"90s":     "经典",
+		"更早":      "经典",
+		"earlier": "经典",
+	}
+
+	tvAlias := map[string]string{
+		"国产":      "国产剧",
+		"国内":      "综艺",
+		"港台":      "综艺",
+		"连载中":     "最近热门",
+		"已完结":     "高分经典",
+		"即将开播":    "最新上线",
+		"新番":      "日本动画",
+		"剧场版":     "日本动画",
+		"OVA":     "日本动画",
+		"2026-冬":  "日本动画",
+		"2025-秋":  "日本动画",
+		"2025-夏":  "日本动画",
+		"2025-春":  "日本动画",
+		"90年代":    "高分经典",
+		"90s":     "高分经典",
+		"更早":      "高分经典",
+		"earlier": "高分经典",
+	}
+
+	if contentType == "movie" {
+		if v, ok := movieAlias[tag]; ok {
+			return v
+		}
+		return tag
+	}
+
+	if v, ok := tvAlias[tag]; ok {
+		return v
+	}
+
+	animeTags := map[string]struct{}{
+		"热血": {}, "恋爱": {}, "搞笑": {}, "悬疑": {}, "科幻": {}, "机战": {},
+		"运动": {}, "校园": {}, "魔法": {}, "冒险": {}, "战斗": {}, "日常": {},
+		"治愈": {}, "奇幻": {}, "后宫": {}, "百合": {}, "耽美": {}, "神魔": {},
+		"推理": {}, "动漫": {},
+	}
+	if _, ok := animeTags[tag]; ok {
+		return "日本动画"
+	}
+
+	varietyTags := map[string]struct{}{
+		"真人秀": {}, "脱口秀": {}, "音乐": {}, "情感": {}, "竞技": {},
+		"美食": {}, "旅行": {}, "游戏": {}, "访谈": {}, "选秀": {},
+		"晚会": {}, "文化": {}, "亲子": {}, "舞蹈": {}, "时尚": {},
+		"明星": {}, "汽车": {},
+	}
+	if _, ok := varietyTags[tag]; ok {
+		return "综艺"
+	}
+
+	return tag
+}
+
+func buildDoubanFilterCatalog() map[string][]gin.H {
+	return map[string][]gin.H{
+		"movie": {
+			{"id": "type", "label": "类型", "options": []string{"全部", "动作", "喜剧", "爱情", "科幻", "恐怖", "悬疑", "犯罪", "动画", "纪录片", "战争", "古装", "奇幻", "冒险", "剧情", "惊悚", "武侠", "家庭", "传记", "历史", "音乐", "运动", "西部", "灾难", "青春", "儿童"}},
+			{"id": "region", "label": "地区", "options": []string{"全部", "华语", "美国", "韩国", "日本", "印度", "泰国", "法国", "英国", "德国", "俄罗斯", "西班牙", "意大利", "其他"}},
+			{"id": "feature", "label": "特色", "options": []string{"全部", "豆瓣高分", "获奖佳作", "新片热映", "经典重温", "IMAX", "4K"}},
+			{"id": "year", "label": "年代", "options": []string{"全部", "2026", "2025", "2024", "2023", "2022", "2021", "2020", "2019", "2010s", "2000s", "90年代", "更早"}},
+		},
+		"tv": {
+			{"id": "type", "label": "类型", "options": []string{"全部", "古装", "都市", "悬疑", "爱情", "武侠", "奇幻", "谍战", "军旅", "喜剧", "家庭", "科幻", "青春", "传奇", "农村", "历史", "宫廷", "仙侠", "甜宠", "职场", "校园", "穿越", "民国"}},
+			{"id": "region", "label": "地区", "options": []string{"全部", "国产", "美剧", "韩剧", "日剧", "港剧", "台剧", "泰剧", "英剧"}},
+			{"id": "status", "label": "状态", "options": []string{"全部", "连载中", "已完结", "即将开播"}},
+			{"id": "year", "label": "年代", "options": []string{"全部", "2026", "2025", "2024", "2023", "2022", "2021", "2020", "2019", "2010s", "2000s", "90年代"}},
+		},
+		"anime": {
+			{"id": "type", "label": "类型", "options": []string{"全部", "热血", "恋爱", "搞笑", "悬疑", "科幻", "机战", "运动", "校园", "魔法", "冒险", "战斗", "日常", "治愈", "奇幻", "后宫", "百合", "耽美", "神魔", "推理", "音乐"}},
+			{"id": "region", "label": "地区", "options": []string{"全部", "日本", "国产", "欧美"}},
+			{"id": "status", "label": "状态", "options": []string{"全部", "连载中", "已完结", "新番", "剧场版", "OVA"}},
+			{"id": "year", "label": "年份", "options": []string{"全部", "2026冬", "2025秋", "2025夏", "2025春", "2024", "2023", "2022", "2021", "2020", "经典"}},
+		},
+		"variety": {
+			{"id": "type", "label": "类型", "options": []string{"全部", "真人秀", "脱口秀", "音乐", "情感", "竞技", "美食", "旅行", "游戏", "访谈", "选秀", "晚会", "喜剧", "文化", "亲子", "舞蹈", "时尚", "明星", "汽车"}},
+			{"id": "region", "label": "地区", "options": []string{"全部", "国内", "韩国", "日本", "欧美", "港台"}},
+			{"id": "status", "label": "状态", "options": []string{"全部", "连载中", "已完结", "即将开播"}},
+			{"id": "year", "label": "年代", "options": []string{"全部", "2026", "2025", "2024", "2023", "2022", "2021", "2020"}},
+		},
+	}
+}
+
+func flattenDoubanFilterCatalog(catalog map[string][]gin.H) []gin.H {
+	result := make([]gin.H, 0, 256)
+	for contentType, groups := range catalog {
+		for _, group := range groups {
+			groupID, _ := group["id"].(string)
+			options, _ := group["options"].([]string)
+			for _, option := range options {
+				if option == "全部" {
+					continue
+				}
+				result = append(result, gin.H{
+					"type":      contentType,
+					"dimension": groupID,
+					"name":      option,
+					"key":       option,
+				})
+			}
+		}
+	}
+	return result
 }
 
 // fetchDoubanData 获取豆瓣数据

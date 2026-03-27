@@ -1,154 +1,230 @@
-/* eslint-disable no-console */
 'use client';
 
-import { useEffect, useState } from 'react';
+import { ChevronRight, Clock, Play, Trash2 } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
 
-import type { PlayRecord } from '@/lib/db.client';
 import {
-  clearAllPlayRecords,
+  deletePlayRecord,
   getAllPlayRecords,
-  subscribeToDataUpdates,
+  PlayRecord,
 } from '@/lib/db.client';
+import { toProxyImageSrc } from '@/lib/image';
+import { useFastNavigation } from '@/lib/navigation-feedback';
 
-import ScrollableRow from '@/components/ScrollableRow';
-import VideoCard from '@/components/VideoCard';
+import SmartImage from '@/components/ui/SmartImage';
+
+interface ContinueWatchingItem {
+  key: string;
+  record: PlayRecord;
+  progress: number;
+}
 
 interface ContinueWatchingProps {
   className?: string;
+  limit?: number;
+  onDataChange?: () => void;
 }
 
-export default function ContinueWatching({ className }: ContinueWatchingProps) {
-  const [playRecords, setPlayRecords] = useState<
-    (PlayRecord & { key: string })[]
-  >([]);
+function formatDuration(seconds: number): string {
+  if (!seconds || seconds <= 0) return '00:00';
+  const hours = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  if (hours > 0) {
+    return `${hours}小时${mins}分`;
+  }
+  return `${mins}分钟`;
+}
+
+function formatTimeAgo(timestamp: number): string {
+  const now = Date.now();
+  const diff = now - timestamp;
+  const minutes = Math.floor(diff / (1000 * 60));
+  const hours = Math.floor(diff / (1000 * 60 * 60));
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+
+  if (minutes < 1) return '刚刚';
+  if (minutes < 60) return `${minutes}分钟前`;
+  if (hours < 24) return `${hours}小时前`;
+  if (days < 7) return `${days}天前`;
+  return new Date(timestamp).toLocaleDateString('zh-CN');
+}
+
+export default function ContinueWatching({
+  className = '',
+  limit = 6,
+  onDataChange,
+}: ContinueWatchingProps) {
+  const { navigate, prefetchHref } = useFastNavigation();
+  const [items, setItems] = useState<ContinueWatchingItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showAll, setShowAll] = useState(false);
 
-  // 处理播放记录数据更新的函数
-  const updatePlayRecords = (allRecords: Record<string, PlayRecord>) => {
-    // 将记录转换为数组并根据 save_time 由近到远排序
-    const recordsArray = Object.entries(allRecords).map(([key, record]) => ({
-      ...record,
-      key,
-    }));
-
-    // 按 save_time 降序排序（最新的在前面）
-    const sortedRecords = recordsArray.sort(
-      (a, b) => b.save_time - a.save_time
-    );
-
-    setPlayRecords(sortedRecords);
+  const loadRecords = async () => {
+    try {
+      const records = await getAllPlayRecords();
+      const list: ContinueWatchingItem[] = Object.entries(records)
+        .map(([key, record]) => ({
+          key,
+          record,
+          progress:
+            record.total_time > 0
+              ? Math.min(100, Math.round((record.play_time / record.total_time) * 100))
+              : 0,
+        }))
+        .sort((a, b) => b.record.save_time - a.record.save_time);
+      setItems(list);
+    } catch {
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
-    const fetchPlayRecords = async () => {
-      try {
-        setLoading(true);
-
-        // 从缓存或API获取所有播放记录
-        const allRecords = await getAllPlayRecords();
-        updatePlayRecords(allRecords);
-      } catch (error) {
-        console.error('获取播放记录失败:', error);
-        setPlayRecords([]);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchPlayRecords();
+    void loadRecords();
 
     // 监听播放记录更新事件
-    const unsubscribe = subscribeToDataUpdates(
-      'playRecordsUpdated',
-      (newRecords: Record<string, PlayRecord>) => {
-        updatePlayRecords(newRecords);
-      }
-    );
+    const handleUpdate = () => {
+      void loadRecords();
+    };
 
-    return unsubscribe;
+    window.addEventListener('playRecordsUpdated', handleUpdate);
+    return () => {
+      window.removeEventListener('playRecordsUpdated', handleUpdate);
+    };
   }, []);
 
-  // 如果没有播放记录，则不渲染组件
-  if (!loading && playRecords.length === 0) {
+  const handleDelete = async (key: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const [source, id] = key.split('+');
+    if (source && id) {
+      try {
+        await deletePlayRecord(source, id);
+        setItems((prev) => prev.filter((item) => item.key !== key));
+        onDataChange?.();
+      } catch {
+        return;
+      }
+    }
+  };
+
+  const buildPlayHref = (item: ContinueWatchingItem) => {
+    const { record, key } = item;
+    const [source, id] = key.split('+');
+    if (!source || !id) return '';
+    return `/play?source=${encodeURIComponent(source)}&id=${encodeURIComponent(
+      id
+    )}&title=${encodeURIComponent(record.title)}&ep=${encodeURIComponent(record.index)}`;
+  };
+
+  const handleClick = (item: ContinueWatchingItem) => {
+    const href = buildPlayHref(item);
+    if (href) navigate(href);
+  };
+
+  const displayedItems = showAll ? items : items.slice(0, limit);
+
+  if (loading) {
+    return (
+      <div className={`${className}`}>
+        <h2 className="mb-4 text-xl font-bold text-white">继续观看</h2>
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+          {Array.from({ length: limit }).map((_, i) => (
+            <div
+              key={i}
+              className="aspect-[2/3] animate-pulse rounded-lg bg-zinc-800"
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (items.length === 0) {
     return null;
   }
 
-  // 计算播放进度百分比
-  const getProgress = (record: PlayRecord) => {
-    if (record.total_time === 0) return 0;
-    return (record.play_time / record.total_time) * 100;
-  };
-
-  // 从 key 中解析 source 和 id
-  const parseKey = (key: string) => {
-    const [source, id] = key.split('+');
-    return { source, id };
-  };
-
   return (
-    <section className={`mb-8 ${className || ''}`}>
-      <div className='mb-4 flex items-center justify-between'>
-        <h2 className='text-xl font-bold text-gray-800 dark:text-gray-200'>
-          继续观看
-        </h2>
-        {!loading && playRecords.length > 0 && (
+    <div className={`${className}`}>
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="text-xl font-bold text-white">继续观看</h2>
+        {items.length > limit && (
           <button
-            className='text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-            onClick={async () => {
-              await clearAllPlayRecords();
-              setPlayRecords([]);
-            }}
+            onClick={() => setShowAll(!showAll)}
+            className="flex items-center gap-1 text-sm text-netflix-red hover:underline"
           >
-            清空
+            {showAll ? '收起' : '查看全部'}
+            <ChevronRight
+              className={`h-4 w-4 transition-transform ${showAll ? 'rotate-90' : ''}`}
+            />
           </button>
         )}
       </div>
-      <ScrollableRow>
-        {loading
-          ? // 加载状态显示灰色占位数据
-            Array.from({ length: 6 }).map((_, index) => (
-              <div
-                key={index}
-                className='min-w-[96px] w-24 sm:min-w-[180px] sm:w-44'
-              >
-                <div className='relative aspect-[2/3] w-full overflow-hidden rounded-lg bg-gray-200 animate-pulse dark:bg-gray-800'>
-                  <div className='absolute inset-0 bg-gray-300 dark:bg-gray-700'></div>
-                </div>
-                <div className='mt-2 h-4 bg-gray-200 rounded animate-pulse dark:bg-gray-800'></div>
-                <div className='mt-1 h-3 bg-gray-200 rounded animate-pulse dark:bg-gray-800'></div>
-              </div>
-            ))
-          : // 显示真实数据
-            playRecords.map((record) => {
-              const { source, id } = parseKey(record.key);
-              return (
-                <div
-                  key={record.key}
-                  className='min-w-[96px] w-24 sm:min-w-[180px] sm:w-44'
-                >
-                  <VideoCard
-                    id={id}
-                    title={record.title}
-                    poster={record.cover}
-                    year={record.year}
-                    source={source}
-                    source_name={record.source_name}
-                    progress={getProgress(record)}
-                    episodes={record.total_episodes}
-                    currentEpisode={record.index}
-                    query={record.search_title}
-                    from='playrecord'
-                    onDelete={() =>
-                      setPlayRecords((prev) =>
-                        prev.filter((r) => r.key !== record.key)
-                      )
-                    }
-                    type={record.total_episodes > 1 ? 'tv' : ''}
+
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+        {displayedItems.map((item) => {
+          const { record, key, progress } = item;
+          return (
+            <div
+              key={key}
+              onClick={() => handleClick(item)}
+              onPointerEnter={() => prefetchHref(buildPlayHref(item))}
+              className="group relative cursor-pointer overflow-hidden rounded-lg bg-zinc-800 transition-transform hover:scale-105"
+            >
+              {/* 封面 */}
+              <div className="relative aspect-[2/3]">
+                <SmartImage
+                  src={toProxyImageSrc(record.cover)}
+                  alt={record.title}
+                  fill
+                  sizes="(max-width: 768px) 50vw, 16vw"
+                  className="h-full w-full object-cover"
+                />
+                {/* 进度条 */}
+                <div className="absolute bottom-0 left-0 right-0 h-1 bg-zinc-700">
+                  <div
+                    className="h-full bg-netflix-red"
+                    style={{ width: `${progress}%` }}
                   />
                 </div>
-              );
-            })}
-      </ScrollableRow>
-    </section>
+                {/* 播放按钮 */}
+                <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
+                  <div className="rounded-full bg-netflix-red p-3">
+                    <Play className="h-6 w-6 fill-white text-white" />
+                  </div>
+                </div>
+                {/* 删除按钮 */}
+                <button
+                  onClick={(e) => handleDelete(key, e)}
+                  className="absolute right-2 top-2 rounded-full bg-black/60 p-1.5 text-white opacity-0 transition-opacity hover:bg-red-600 group-hover:opacity-100"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+                {/* 集数标记 */}
+                <div className="absolute left-2 top-2 rounded bg-black/60 px-1.5 py-0.5 text-xs text-white">
+                  第 {record.index} 集
+                </div>
+              </div>
+
+              {/* 信息 */}
+              <div className="p-2">
+                <h3 className="truncate text-sm font-medium text-white">
+                  {record.title}
+                </h3>
+                <div className="mt-1 flex items-center gap-2 text-xs text-zinc-400">
+                  <span className="flex items-center gap-0.5">
+                    <Clock className="h-3 w-3" />
+                    {formatTimeAgo(record.save_time)}
+                  </span>
+                </div>
+                <div className="mt-1 text-xs text-zinc-500">
+                  观看到 {formatDuration(record.play_time)}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }

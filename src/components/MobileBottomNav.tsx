@@ -1,127 +1,72 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 'use client';
 
-import { Cat, Clover, Film, Home, Radio, Star, Tv } from 'lucide-react';
-import Link from 'next/link';
+import { Clapperboard, Flame, Heart, Home, Search } from 'lucide-react';
 import { usePathname } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import React from 'react';
 
-interface MobileBottomNavProps {
-  /**
-   * 主动指定当前激活的路径。当未提供时，自动使用 usePathname() 获取的路径。
-   */
-  activePath?: string;
-}
+import { useFastNavigation } from '@/lib/navigation-feedback';
 
-const MobileBottomNav = ({ activePath }: MobileBottomNavProps) => {
+const navItems = [
+  { path: '/', label: '首页', icon: Home },
+  { path: '/movie', label: '片库', icon: Clapperboard },
+  { path: '/search', label: '搜索', icon: Search },
+  { path: '/hot', label: '热播', icon: Flame },
+  { path: '/favorites', label: '收藏', icon: Heart },
+];
+
+export default function MobileBottomNav() {
   const pathname = usePathname();
+  const { navigate, prefetchHref } = useFastNavigation();
 
-  // 当前激活路径：优先使用传入的 activePath，否则回退到浏览器地址
-  const currentActive = activePath ?? pathname;
+  // 只在移动端显示
+  const [isMobile, setIsMobile] = React.useState(false);
 
-  const [navItems, setNavItems] = useState([
-    { icon: Home, label: '首页', href: '/' },
-    {
-      icon: Film,
-      label: '电影',
-      href: '/douban?type=movie',
-    },
-    {
-      icon: Tv,
-      label: '剧集',
-      href: '/douban?type=tv',
-    },
-    {
-      icon: Cat,
-      label: '动漫',
-      href: '/douban?type=anime',
-    },
-    {
-      icon: Clover,
-      label: '综艺',
-      href: '/douban?type=show',
-    },
-    {
-      icon: Radio,
-      label: '直播',
-      href: '/live',
-    },
-  ]);
+  React.useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
 
-  useEffect(() => {
-    const runtimeConfig = (window as any).RUNTIME_CONFIG;
-    if (runtimeConfig?.CUSTOM_CATEGORIES?.length > 0) {
-      setNavItems((prevItems) => [
-        ...prevItems,
-        {
-          icon: Star,
-          label: '自定义',
-          href: '/douban?type=custom',
-        },
-      ]);
-    }
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  const isActive = (href: string) => {
-    const typeMatch = href.match(/type=([^&]+)/)?.[1];
+  React.useEffect(() => {
+    navItems.forEach((item) => prefetchHref(item.path));
+  }, [prefetchHref]);
 
-    // 解码URL以进行正确的比较
-    const decodedActive = decodeURIComponent(currentActive);
-    const decodedItemHref = decodeURIComponent(href);
+  if (!isMobile) return null;
 
-    return (
-      decodedActive === decodedItemHref ||
-      (decodedActive.startsWith('/douban') &&
-        decodedActive.includes(`type=${typeMatch}`))
-    );
-  };
+  // 在播放页面不显示
+  if (pathname.startsWith('/play')) return null;
 
   return (
-    <nav
-      className='md:hidden fixed left-0 right-0 z-[600] bg-white/90 backdrop-blur-xl border-t border-gray-200/50 overflow-hidden dark:bg-gray-900/80 dark:border-gray-700/50'
-      style={{
-        /* 紧贴视口底部，同时在内部留出安全区高度 */
-        bottom: 0,
-        paddingBottom: 'env(safe-area-inset-bottom)',
-        minHeight: 'calc(3.5rem + env(safe-area-inset-bottom))',
-      }}
-    >
-      <ul className='flex items-center overflow-x-auto scrollbar-hide'>
+    <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-zinc-800 bg-zinc-950/95 shadow-[0_-10px_30px_rgba(0,0,0,0.35)] backdrop-blur-md md:hidden">
+      <div className="grid grid-cols-5 gap-1 px-2 py-2">
         {navItems.map((item) => {
-          const active = isActive(item.href);
+          const Icon = item.icon;
+          const isActive =
+            item.path === '/'
+              ? pathname === item.path
+              : pathname === item.path || pathname.startsWith(`${item.path}/`);
+
           return (
-            <li
-              key={item.href}
-              className='flex-shrink-0'
-              style={{ width: '20vw', minWidth: '20vw' }}
+            <button
+              key={item.path}
+              onClick={() => navigate(item.path)}
+              onPointerEnter={() => prefetchHref(item.path)}
+              className={`flex flex-col items-center gap-1 rounded-2xl px-2 py-2 transition-all ${
+                isActive
+                  ? 'bg-white text-black shadow-[0_10px_20px_rgba(255,255,255,0.12)]'
+                  : 'text-zinc-400'
+              }`}
             >
-              <Link
-                href={item.href}
-                className='flex flex-col items-center justify-center w-full h-14 gap-1 text-xs'
-              >
-                <item.icon
-                  className={`h-6 w-6 ${active
-                    ? 'text-green-600 dark:text-green-400'
-                    : 'text-gray-500 dark:text-gray-400'
-                    }`}
-                />
-                <span
-                  className={
-                    active
-                      ? 'text-green-600 dark:text-green-400'
-                      : 'text-gray-600 dark:text-gray-300'
-                  }
-                >
-                  {item.label}
-                </span>
-              </Link>
-            </li>
+              <Icon className={`h-5 w-5 ${isActive ? 'text-black' : ''}`} />
+              <span className="text-[10px] font-medium">{item.label}</span>
+            </button>
           );
         })}
-      </ul>
+      </div>
     </nav>
   );
-};
-
-export default MobileBottomNav;
+}

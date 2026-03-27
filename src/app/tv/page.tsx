@@ -1,226 +1,120 @@
 'use client';
 
-import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { motion } from 'framer-motion';
-import TopNav from '@/components/layout/TopNav';
-import ContentCard from '@/components/home/ContentCard';
-import { Loader2 } from 'lucide-react';
+import { Tv } from 'lucide-react';
 
-interface TVItem {
-  id: string;
-  title: string;
-  cover: string;
-  rate: string;
-  year: string;
-}
+import BrowsePage from '@/components/BrowsePage';
 
-const categories = [
-  { label: '最近热门', value: '最近热门' },
+// 电视剧类型选项（22+）
+const types = [
+  { label: '全部', value: '全部' },
+  { label: '古装', value: '古装' },
+  { label: '都市', value: '都市' },
+  { label: '悬疑', value: '悬疑' },
+  { label: '爱情', value: '爱情' },
+  { label: '武侠', value: '武侠' },
+  { label: '奇幻', value: '奇幻' },
+  { label: '谍战', value: '谍战' },
+  { label: '军旅', value: '军旅' },
+  { label: '喜剧', value: '喜剧' },
+  { label: '家庭', value: '家庭' },
+  { label: '科幻', value: '科幻' },
+  { label: '青春', value: '青春' },
+  { label: '传奇', value: '传奇' },
+  { label: '农村', value: '农村' },
+  { label: '历史', value: '历史' },
+  { label: '宫廷', value: '宫廷' },
+  { label: '仙侠', value: '仙侠' },
+  { label: '甜宠', value: '甜宠' },
+  { label: '职场', value: '职场' },
+  { label: '校园', value: '校园' },
+  { label: '穿越', value: '穿越' },
+  { label: '民国', value: '民国' },
+];
+
+// 地区选项
+const regions = [
+  { label: '全部', value: '全部' },
   { label: '国产剧', value: '国产剧' },
   { label: '美剧', value: '美剧' },
-  { label: '日剧', value: '日剧' },
   { label: '韩剧', value: '韩剧' },
+  { label: '日剧', value: '日剧' },
   { label: '港剧', value: '港剧' },
   { label: '台剧', value: '台剧' },
   { label: '泰剧', value: '泰剧' },
+  { label: '英剧', value: '英剧' },
 ];
 
-const types = ['全部', '剧情', '爱情', '喜剧', '悬疑', '古装', '动作', '家庭', '犯罪', '奇幻'];
+// 状态选项
+const status = [
+  { label: '全部', value: '全部' },
+  { label: '连载中', value: '连载中' },
+  { label: '已完结', value: '已完结' },
+  { label: '即将开播', value: '即将开播' },
+];
+
+// 年代选项（单年精确到2026）
+const years = [
+  { label: '全部', value: '全部' },
+  { label: '2026', value: '2026' },
+  { label: '2025', value: '2025' },
+  { label: '2024', value: '2024' },
+  { label: '2023', value: '2023' },
+  { label: '2022', value: '2022' },
+  { label: '2021', value: '2021' },
+  { label: '2020', value: '2020' },
+  { label: '2019', value: '2019' },
+  { label: '2010s', value: '2010s' },
+  { label: '2000s', value: '2000s' },
+  { label: '90年代', value: '90s' },
+];
+
+// 排序选项
+const sortOptions = [
+  { label: '综合排序', value: 'default' },
+  { label: '最新上线', value: 'latest' },
+  { label: '最热播放', value: 'hot' },
+  { label: '最高评分', value: 'rating' },
+  { label: '最多弹幕', value: 'comments' },
+];
+
+// 筛选组配置
+const filterGroups = [
+  {
+    id: 'type',
+    label: '类型',
+    options: types,
+    multiple: true,
+  },
+  {
+    id: 'region',
+    label: '地区',
+    options: regions,
+    multiple: false,
+  },
+  {
+    id: 'status',
+    label: '状态',
+    options: status,
+    multiple: false,
+  },
+  {
+    id: 'year',
+    label: '年代',
+    options: years,
+    multiple: false,
+  },
+];
 
 export default function TVPage() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const [tvs, setTvs] = useState<TVItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
-  const [page, setPage] = useState(0);
-  const [selectedCategory, setSelectedCategory] = useState(searchParams.get('category') || '最近热门');
-  const [selectedType, setSelectedType] = useState(searchParams.get('type') || '全部');
-  const observerRef = useRef<IntersectionObserver | null>(null);
-  const loadingRef = useRef<HTMLDivElement>(null);
-
-  const fetchTVs = useCallback(async (pageNum: number, isLoadMore = false) => {
-    if (!isLoadMore) setLoading(true);
-    else setLoadingMore(true);
-
-    try {
-      const params = new URLSearchParams({
-        kind: 'tv',
-        category: selectedCategory,
-        type: selectedType === '全部' ? 'tv' : selectedType,
-        limit: '25',
-        start: (pageNum * 25).toString(),
-      });
-
-      const response = await fetch(`/api/douban/categories?${params}`);
-      if (!response.ok) throw new Error('获取数据失败');
-      
-      const data = await response.json();
-      const newItems = (data.list || []).map((item: any) => ({
-        id: item.id?.toString() || Math.random().toString(),
-        title: item.title,
-        cover: item.poster || item.cover || '/placeholder-poster.svg',
-        rate: item.rate || '',
-        year: item.year || '',
-      }));
-
-      if (isLoadMore) {
-        setTvs(prev => [...prev, ...newItems]);
-      } else {
-        setTvs(newItems);
-      }
-      
-      setHasMore(newItems.length === 25);
-    } catch (error) {
-      console.error('Fetch TV error:', error);
-    } finally {
-      setLoading(false);
-      setLoadingMore(false);
-    }
-  }, [selectedCategory, selectedType]);
-
-  useEffect(() => {
-    setPage(0);
-    fetchTVs(0, false);
-    
-    const params = new URLSearchParams();
-    params.set('category', selectedCategory);
-    if (selectedType !== '全部') params.set('type', selectedType);
-    router.replace(`/tv?${params.toString()}`);
-  }, [selectedCategory, selectedType]);
-
-  useEffect(() => {
-    if (!loadingRef.current || !hasMore) return;
-
-    observerRef.current = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && !loadingMore && hasMore) {
-          setPage(prev => {
-            const nextPage = prev + 1;
-            fetchTVs(nextPage, true);
-            return nextPage;
-          });
-        }
-      },
-      { threshold: 0.1 }
-    );
-
-    observerRef.current.observe(loadingRef.current);
-    return () => observerRef.current?.disconnect();
-  }, [hasMore, loadingMore, fetchTVs]);
-
   return (
-    <main className="min-h-screen bg-[#141414]">
-      <TopNav />
-      
-      {/* Hero Header */}
-      <div className="relative h-[50vh] min-h-[400px] overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-b from-blue-600/20 to-[#141414]" />
-        <div className="absolute inset-0 bg-gradient-to-t from-[#141414] via-transparent to-black/50" />
-        
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div className="text-center px-4">
-            <motion.h1 
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="text-4xl md:text-6xl font-black text-white mb-4"
-            >
-              电视剧
-            </motion.h1>
-            <motion.p 
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 }}
-              className="text-gray-400 text-lg"
-            >
-              热播剧集 · 精彩连播 · 追剧不停
-            </motion.p>
-          </div>
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className="sticky top-16 z-40 bg-[#141414]/95 backdrop-blur-md border-b border-gray-800">
-        <div className="max-w-[1920px] mx-auto px-4 sm:px-8 py-4">
-          <div className="flex items-center gap-4 overflow-x-auto scrollbar-hide pb-2">
-            <span className="text-gray-400 text-sm whitespace-nowrap">分类：</span>
-            {categories.map((cat) => (
-              <button
-                key={cat.value}
-                onClick={() => setSelectedCategory(cat.value)}
-                className={`px-4 py-1.5 rounded-full text-sm whitespace-nowrap transition-colors ${
-                  selectedCategory === cat.value
-                    ? 'bg-[#E50914] text-white'
-                    : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-                }`}
-              >
-                {cat.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="flex items-center gap-4 overflow-x-auto scrollbar-hide mt-3">
-            <span className="text-gray-400 text-sm whitespace-nowrap">类型：</span>
-            {types.map((type) => (
-              <button
-                key={type}
-                onClick={() => setSelectedType(type)}
-                className={`px-3 py-1 rounded-full text-sm whitespace-nowrap transition-colors ${
-                  selectedType === type
-                    ? 'bg-white text-black'
-                    : 'bg-gray-800/50 text-gray-400 hover:bg-gray-800'
-                }`}
-              >
-                {type}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Content Grid */}
-      <div className="max-w-[1920px] mx-auto px-4 sm:px-8 py-8">
-        {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <Loader2 className="w-10 h-10 text-[#E50914] animate-spin" />
-          </div>
-        ) : (
-          <>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-6">
-              {tvs.map((tv, index) => (
-                <ContentCard
-                  key={`${tv.id}-${index}`}
-                  title={tv.title}
-                  cover={tv.cover}
-                  rating={tv.rate}
-                  year={tv.year}
-                  type="tv"
-                />
-              ))}
-            </div>
-
-            {tvs.length === 0 && !loading && (
-              <div className="text-center py-20 text-gray-500">
-                暂无相关内容
-              </div>
-            )}
-
-            <div ref={loadingRef} className="flex justify-center py-8">
-              {loadingMore && (
-                <Loader2 className="w-8 h-8 text-[#E50914] animate-spin" />
-              )}
-            </div>
-
-            {!hasMore && tvs.length > 0 && (
-              <div className="text-center py-8 text-gray-500">
-                已加载全部内容
-              </div>
-            )}
-          </>
-        )}
-      </div>
-    </main>
+    <BrowsePage
+      title='电视剧'
+      subtitle='热播剧集 · 精彩连播 · 追剧不停'
+      kind='tv'
+      filterGroups={filterGroups}
+      sortOptions={sortOptions}
+      heroGradient='from-blue-600/20'
+      icon={<Tv className='w-16 h-16 text-blue-500' />}
+    />
   );
 }

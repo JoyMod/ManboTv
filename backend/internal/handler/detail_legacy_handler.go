@@ -41,6 +41,11 @@ func (h *DetailHandler) GetDetailLegacy(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	filteredDetail, ok := filterResult(*detail, resolveContentPolicyFromRequest(c, h.adminStorage))
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "资源已被内容策略拦截"})
+		return
+	}
 
-	c.JSON(http.StatusOK, detail)
+	c.JSON(http.StatusOK, filteredDetail)
 }

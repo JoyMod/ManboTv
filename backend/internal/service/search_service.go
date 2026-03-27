@@ -53,8 +53,8 @@ type searchService struct {
 
 const (
 	defaultSearchTimeout         = 10 * time.Second
-	defaultSourceTimeout         = 2 * time.Second
-	defaultFastReturnAfter       = 1200 * time.Millisecond
+	defaultSourceTimeout         = 5 * time.Second
+	defaultFastReturnAfter       = 0
 	defaultSearchRetryTimes      = 2
 	defaultSearchCacheMaxEntries = 512
 )
@@ -85,7 +85,7 @@ func NewSearchService(cfg *config.SearchConfig, httpCfg *config.HTTPClientConfig
 	if fastReturnAfter <= 0 {
 		fastReturnAfter = defaultFastReturnAfter
 	}
-	if fastReturnAfter > sourceTimeout {
+	if fastReturnAfter > 0 && fastReturnAfter > sourceTimeout {
 		fastReturnAfter = sourceTimeout
 	}
 
@@ -173,8 +173,13 @@ func (s *searchService) Search(ctx context.Context, query string, sites []model.
 		close(resultCh)
 	}()
 
-	fastTimer := time.NewTimer(s.fastReturnAfter)
-	defer fastTimer.Stop()
+	var fastTimer *time.Timer
+	var fastTimerCh <-chan time.Time
+	if s.fastReturnAfter > 0 {
+		fastTimer = time.NewTimer(s.fastReturnAfter)
+		fastTimerCh = fastTimer.C
+		defer fastTimer.Stop()
+	}
 
 	results := make([]model.SearchResult, 0)
 	completed := 0
@@ -197,7 +202,7 @@ COLLECT:
 			}
 			results = append(results, item.Results...)
 
-		case <-fastTimer.C:
+		case <-fastTimerCh:
 			// 快源优先：如果已有部分源完成，直接降级返回，避免被慢源拖尾
 			if completed > 0 && completed < len(sites) {
 				degraded = true
@@ -268,20 +273,35 @@ func (s *searchService) SearchSingle(ctx context.Context, site model.ApiSite, qu
 
 // searchSingle 内部单源搜索实现
 func (s *searchService) searchSingle(ctx context.Context, site model.ApiSite, query string) ([]model.SearchResult, error) {
-	searchURL := fmt.Sprintf("%s?ac=videolist&wd=%s",
-		site.API,
-		url.QueryEscape(query),
-	)
-
 	var results []model.SearchResult
-	err := s.withRetry(ctx, func() error {
-		res, err := s.doSearchRequest(ctx, searchURL)
-		if err != nil {
-			return err
+	queries := []string{query}
+	normalized := normalizeSearchKeyword(query)
+	if normalized != "" && normalized != query {
+		queries = append(queries, normalized)
+	}
+
+	var err error
+	for _, q := range queries {
+		searchURL, buildErr := appendProviderQuery(site.API, url.Values{
+			"ac": {"videolist"},
+			"wd": {q},
+		})
+		if buildErr != nil {
+			err = fmt.Errorf("构建搜索URL失败: %w", buildErr)
+			continue
 		}
-		results = res
-		return nil
-	})
+		err = s.withRetry(ctx, func() error {
+			res, reqErr := s.doSearchRequest(ctx, searchURL, site)
+			if reqErr != nil {
+				return reqErr
+			}
+			results = res
+			return nil
+		})
+		if err == nil && len(results) > 0 {
+			break
+		}
+	}
 
 	if err != nil {
 		return nil, fmt.Errorf("搜索源 %s 失败: %w", site.Name, err)
@@ -296,8 +316,29 @@ func (s *searchService) searchSingle(ctx context.Context, site model.ApiSite, qu
 	return results, nil
 }
 
+func normalizeSearchKeyword(query string) string {
+	trimmed := strings.TrimSpace(query)
+	if trimmed == "" {
+		return ""
+	}
+	replacer := strings.NewReplacer(
+		"！", "",
+		"!", "",
+		"？", "",
+		"?", "",
+		"：", "",
+		":", "",
+		"·", "",
+		"，", "",
+		",", "",
+		"。", "",
+		" ", "",
+	)
+	return replacer.Replace(trimmed)
+}
+
 // doSearchRequest 执行搜索请求
-func (s *searchService) doSearchRequest(ctx context.Context, searchURL string) ([]model.SearchResult, error) {
+func (s *searchService) doSearchRequest(ctx context.Context, searchURL string, site model.ApiSite) ([]model.SearchResult, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, searchURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("创建请求失败: %w", err)
@@ -326,15 +367,29 @@ func (s *searchService) doSearchRequest(ctx context.Context, searchURL string) (
 		return nil, fmt.Errorf("解析JSON失败: %w", err)
 	}
 
-	if apiResp.Code != 0 && apiResp.Msg != "" {
+	if len(apiResp.List) == 0 {
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(body, &raw); err == nil {
+			if dataRaw, ok := raw["data"]; ok {
+				var nested struct {
+					List []model.ApiSearchItem `json:"list"`
+				}
+				if json.Unmarshal(dataRaw, &nested) == nil && len(nested.List) > 0 {
+					apiResp.List = nested.List
+				}
+			}
+		}
+	}
+
+	if len(apiResp.List) == 0 && apiResp.Code != 0 && apiResp.Msg != "" {
 		return nil, fmt.Errorf("API错误: %s", apiResp.Msg)
 	}
 
-	return s.parseResults(apiResp.List), nil
+	return s.parseResults(apiResp.List, site), nil
 }
 
 // parseResults 解析搜索结果
-func (s *searchService) parseResults(items []model.ApiSearchItem) []model.SearchResult {
+func (s *searchService) parseResults(items []model.ApiSearchItem, site model.ApiSite) []model.SearchResult {
 	results := make([]model.SearchResult, 0, len(items))
 
 	for _, item := range items {
@@ -344,19 +399,21 @@ func (s *searchService) parseResults(items []model.ApiSearchItem) []model.Search
 		}
 
 		result := model.SearchResult{
-			ID:             item.VodID,
+			ID:             item.VodID.String(),
 			Title:          strings.TrimSpace(item.VodName),
-			Poster:         item.VodPic,
+			Poster:         normalizeMediaURL(item.VodPic, site.API),
 			Episodes:       episodes,
 			EpisodesTitles: titles,
+			Source:         site.Key,
+			SourceName:     site.Name,
 			Class:          item.VodClass,
 			Year:           s.extractYear(item.VodYear),
 			Desc:           item.VodContent,
 			TypeName:       item.TypeName,
-			DoubanID:       item.VodDoubanID,
+			DoubanID:       int(item.VodDoubanID),
 		}
 
-		results = append(results, result)
+		results = append(results, EnrichSearchResult(result))
 	}
 
 	return results
@@ -436,7 +493,7 @@ func (s *searchService) resolveSearchTimeout() time.Duration {
 
 func (s *searchService) resolveMaxConcurrent() int {
 	if s.config == nil || s.config.MaxConcurrent <= 0 {
-		return 1
+		return 8
 	}
 	return s.config.MaxConcurrent
 }

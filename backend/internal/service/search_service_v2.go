@@ -26,10 +26,10 @@ type SearchServiceV2 interface {
 
 // searchServiceV2 实现
 type searchServiceV2 struct {
-	client      *http.Client
-	config      *config.SearchConfig
-	logger      *zap.Logger
-	semaphore   chan struct{} // 信号量channel控制并发
+	client    *http.Client
+	config    *config.SearchConfig
+	logger    *zap.Logger
+	semaphore chan struct{} // 信号量channel控制并发
 }
 
 // NewSearchServiceV2 创建基于Channel的搜索服务
@@ -59,7 +59,7 @@ func (s *searchServiceV2) Search(ctx context.Context, query string, sites []mode
 	// Channel收集结果
 	resultChan := make(chan []model.SearchResult, len(sites))
 	errChan := make(chan error, len(sites))
-	
+
 	// 原子计数器
 	var completed int32
 	total := int32(len(sites))
@@ -67,17 +67,17 @@ func (s *searchServiceV2) Search(ctx context.Context, query string, sites []mode
 	// 启动worker
 	for _, site := range sites {
 		site := site // 捕获
-		
+
 		// 使用semaphore控制并发数
 		select {
 		case s.semaphore <- struct{}{}: // 获取信号量
 			go func() {
 				defer func() { <-s.semaphore }() // 释放信号量
-				
+
 				results, err := s.searchSingle(ctx, site, query)
-				
+
 				atomic.AddInt32(&completed, 1)
-				
+
 				if err != nil {
 					s.logger.Warn("搜索源失败",
 						zap.String("source", site.Name),
@@ -86,13 +86,13 @@ func (s *searchServiceV2) Search(ctx context.Context, query string, sites []mode
 					errChan <- err
 					return
 				}
-				
+
 				select {
 				case resultChan <- results:
 				case <-ctx.Done():
 				}
 			}()
-			
+
 		case <-ctx.Done():
 			// 上下文取消，不再启动新worker
 			continue
@@ -102,16 +102,16 @@ func (s *searchServiceV2) Search(ctx context.Context, query string, sites []mode
 	// 收集结果
 	var allResults []model.SearchResult
 	var errors []error
-	
+
 	// 等待所有worker完成或使用channel收集
 	for atomic.LoadInt32(&completed) < total {
 		select {
 		case results := <-resultChan:
 			allResults = append(allResults, results...)
-			
+
 		case err := <-errChan:
 			errors = append(errors, err)
-			
+
 		case <-ctx.Done():
 			s.logger.Warn("搜索超时",
 				zap.String("query", query),
@@ -180,6 +180,20 @@ func (s *searchServiceV2) searchSingle(ctx context.Context, site model.ApiSite, 
 		return nil, fmt.Errorf("解析JSON失败: %w", err)
 	}
 
+	if len(apiResp.List) == 0 {
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(body, &raw); err == nil {
+			if dataRaw, ok := raw["data"]; ok {
+				var nested struct {
+					List []model.ApiSearchItem `json:"list"`
+				}
+				if json.Unmarshal(dataRaw, &nested) == nil && len(nested.List) > 0 {
+					apiResp.List = nested.List
+				}
+			}
+		}
+	}
+
 	results := s.parseResults(apiResp.List, site)
 	return results, nil
 }
@@ -194,10 +208,10 @@ func (s *searchServiceV2) parseResults(items []model.ApiSearchItem, site model.A
 			continue
 		}
 
-		results = append(results, model.SearchResult{
-			ID:             item.VodID,
+		result := model.SearchResult{
+			ID:             item.VodID.String(),
 			Title:          strings.TrimSpace(item.VodName),
-			Poster:         item.VodPic,
+			Poster:         normalizeMediaURL(item.VodPic, site.API),
 			Episodes:       episodes,
 			EpisodesTitles: titles,
 			Source:         site.Key,
@@ -206,7 +220,9 @@ func (s *searchServiceV2) parseResults(items []model.ApiSearchItem, site model.A
 			Year:           s.extractYear(item.VodYear),
 			Desc:           item.VodContent,
 			TypeName:       item.TypeName,
-		})
+		}
+
+		results = append(results, EnrichSearchResult(result))
 	}
 
 	return results
@@ -255,7 +271,7 @@ func (s *searchServiceV2) extractYear(year string) string {
 	if year == "" {
 		return "unknown"
 	}
-	
+
 	for i := 0; i <= len(year)-4; i++ {
 		if year[i] >= '0' && year[i] <= '9' &&
 			year[i+1] >= '0' && year[i+1] <= '9' &&

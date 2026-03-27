@@ -61,6 +61,7 @@ func (h *SearchHandler) Search(c *gin.Context) {
 		c.JSON(http.StatusOK, model.Error(model.CodeInternalError, "搜索服务暂时不可用"))
 		return
 	}
+	results = filterResults(results, resolveContentPolicyFromRequest(c, h.adminStorage))
 
 	// 分页处理
 	paginatedResults := h.paginate(results, req.Page, req.PageSize)
@@ -112,6 +113,7 @@ func (h *SearchHandler) SearchSingle(c *gin.Context) {
 		c.JSON(http.StatusOK, model.Error(model.CodeInternalError, "搜索失败"))
 		return
 	}
+	results = filterResults(results, resolveContentPolicyFromRequest(c, h.adminStorage))
 
 	c.JSON(http.StatusOK, model.Success(results))
 }

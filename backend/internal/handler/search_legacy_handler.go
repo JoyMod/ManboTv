@@ -30,6 +30,7 @@ func (h *SearchHandler) SearchLegacy(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "搜索失败", "results": []interface{}{}})
 		return
 	}
+	results = filterResults(results, resolveContentPolicyFromRequest(c, h.adminStorage))
 
 	c.JSON(http.StatusOK, gin.H{"results": results})
 }
@@ -59,6 +60,7 @@ func (h *SearchHandler) SearchSingleLegacy(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "搜索失败", "result": nil})
 		return
 	}
+	results = filterResults(results, resolveContentPolicyFromRequest(c, h.adminStorage))
 
 	if len(results) == 0 {
 		c.JSON(http.StatusNotFound, gin.H{"error": "未找到结果", "result": nil})
@@ -122,6 +124,7 @@ func (h *SearchHandler) SearchStreamLegacy(c *gin.Context) {
 
 	ctx := c.Request.Context()
 	sites := h.resolveSites(c)
+	policy := resolveContentPolicyFromRequest(c, h.adminStorage)
 	ch := make(chan streamMessage, len(sites))
 
 	var wg sync.WaitGroup
@@ -145,6 +148,7 @@ func (h *SearchHandler) SearchStreamLegacy(c *gin.Context) {
 				}}
 				return
 			}
+			results = filterResults(results, policy)
 
 			ch <- streamMessage{Payload: gin.H{
 				"type":       "source_result",

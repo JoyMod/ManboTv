@@ -1,221 +1,108 @@
 'use client';
 
-import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { motion } from 'framer-motion';
-import TopNav from '@/components/layout/TopNav';
-import ContentCard from '@/components/home/ContentCard';
-import { Loader2 } from 'lucide-react';
+import { Smile } from 'lucide-react';
 
-interface VarietyItem {
-  id: string;
-  title: string;
-  cover: string;
-  rate: string;
-  year: string;
-}
+import BrowsePage from '@/components/BrowsePage';
 
-const categories = [
-  { label: '最近热门', value: '最近热门' },
-  { label: '国内', value: '国内' },
-  { label: '国外', value: '国外' },
+// 综艺类型选项（18+）
+const types = [
+  { label: '全部', value: '全部' },
+  { label: '真人秀', value: '真人秀' },
+  { label: '脱口秀', value: '脱口秀' },
+  { label: '音乐', value: '音乐' },
+  { label: '情感', value: '情感' },
+  { label: '竞技', value: '竞技' },
+  { label: '美食', value: '美食' },
+  { label: '旅行', value: '旅行' },
+  { label: '游戏', value: '游戏' },
+  { label: '访谈', value: '访谈' },
+  { label: '选秀', value: '选秀' },
+  { label: '晚会', value: '晚会' },
+  { label: '喜剧', value: '喜剧' },
+  { label: '文化', value: '文化' },
+  { label: '亲子', value: '亲子' },
+  { label: '舞蹈', value: '舞蹈' },
+  { label: '时尚', value: '时尚' },
+  { label: '明星', value: '明星' },
+  { label: '汽车', value: '汽车' },
 ];
 
-const types = ['全部', '真人秀', '脱口秀', '音乐', '歌舞'];
+// 地区选项
+const regions = [
+  { label: '全部', value: '全部' },
+  { label: '国内', value: '国内' },
+  { label: '韩国', value: '韩国' },
+  { label: '日本', value: '日本' },
+  { label: '欧美', value: '欧美' },
+  { label: '港台', value: '港台' },
+];
+
+// 状态选项
+const status = [
+  { label: '全部', value: '全部' },
+  { label: '连载中', value: '连载中' },
+  { label: '已完结', value: '已完结' },
+  { label: '即将开播', value: '即将开播' },
+];
+
+// 年代选项（近5年）
+const years = [
+  { label: '全部', value: '全部' },
+  { label: '2026', value: '2026' },
+  { label: '2025', value: '2025' },
+  { label: '2024', value: '2024' },
+  { label: '2023', value: '2023' },
+  { label: '2022', value: '2022' },
+  { label: '2021', value: '2021' },
+  { label: '2020', value: '2020' },
+];
+
+// 排序选项
+const sortOptions = [
+  { label: '综合排序', value: 'default' },
+  { label: '最新上线', value: 'latest' },
+  { label: '最热播放', value: 'hot' },
+  { label: '最多评论', value: 'comments' },
+];
+
+// 筛选组配置
+const filterGroups = [
+  {
+    id: 'type',
+    label: '类型',
+    options: types,
+    multiple: true,
+  },
+  {
+    id: 'region',
+    label: '地区',
+    options: regions,
+    multiple: false,
+  },
+  {
+    id: 'status',
+    label: '状态',
+    options: status,
+    multiple: false,
+  },
+  {
+    id: 'year',
+    label: '年代',
+    options: years,
+    multiple: false,
+  },
+];
 
 export default function VarietyPage() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const [items, setItems] = useState<VarietyItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
-  const [page, setPage] = useState(0);
-  const [selectedCategory, setSelectedCategory] = useState(searchParams.get('category') || '最近热门');
-  const [selectedType, setSelectedType] = useState(searchParams.get('type') || '全部');
-  const observerRef = useRef<IntersectionObserver | null>(null);
-  const loadingRef = useRef<HTMLDivElement>(null);
-
-  const fetchData = useCallback(async (pageNum: number, isLoadMore = false) => {
-    if (!isLoadMore) setLoading(true);
-    else setLoadingMore(true);
-
-    try {
-      const params = new URLSearchParams({
-        kind: 'tv',
-        category: 'show',
-        type: selectedType === '全部' ? 'show' : selectedType,
-        limit: '25',
-        start: (pageNum * 25).toString(),
-      });
-
-      const response = await fetch(`/api/douban/categories?${params}`);
-      if (!response.ok) throw new Error('获取数据失败');
-      
-      const data = await response.json();
-      const newItems = (data.list || []).map((item: any) => ({
-        id: item.id?.toString() || Math.random().toString(),
-        title: item.title,
-        cover: item.poster || item.cover || '/placeholder-poster.svg',
-        rate: item.rate || '',
-        year: item.year || '',
-      }));
-
-      if (isLoadMore) {
-        setItems(prev => [...prev, ...newItems]);
-      } else {
-        setItems(newItems);
-      }
-      
-      setHasMore(newItems.length === 25);
-    } catch (error) {
-      console.error('Fetch variety error:', error);
-    } finally {
-      setLoading(false);
-      setLoadingMore(false);
-    }
-  }, [selectedCategory, selectedType]);
-
-  useEffect(() => {
-    setPage(0);
-    fetchData(0, false);
-    
-    const params = new URLSearchParams();
-    params.set('category', selectedCategory);
-    if (selectedType !== '全部') params.set('type', selectedType);
-    router.replace(`/variety?${params.toString()}`);
-  }, [selectedCategory, selectedType]);
-
-  useEffect(() => {
-    if (!loadingRef.current || !hasMore) return;
-
-    observerRef.current = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && !loadingMore && hasMore) {
-          setPage(prev => {
-            const nextPage = prev + 1;
-            fetchData(nextPage, true);
-            return nextPage;
-          });
-        }
-      },
-      { threshold: 0.1 }
-    );
-
-    observerRef.current.observe(loadingRef.current);
-    return () => observerRef.current?.disconnect();
-  }, [hasMore, loadingMore, fetchData]);
-
   return (
-    <main className="min-h-screen bg-[#141414]">
-      <TopNav />
-      
-      {/* Hero Header */}
-      <div className="relative h-[50vh] min-h-[400px] overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-b from-yellow-600/20 to-[#141414]" />
-        <div className="absolute inset-0 bg-gradient-to-t from-[#141414] via-transparent to-black/50" />
-        
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div className="text-center px-4">
-            <motion.h1 
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="text-4xl md:text-6xl font-black text-white mb-4"
-            >
-              综艺
-            </motion.h1>
-            <motion.p 
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 }}
-              className="text-gray-400 text-lg"
-            >
-              热门综艺 · 欢乐不停 · 精彩不断
-            </motion.p>
-          </div>
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className="sticky top-16 z-40 bg-[#141414]/95 backdrop-blur-md border-b border-gray-800">
-        <div className="max-w-[1920px] mx-auto px-4 sm:px-8 py-4">
-          <div className="flex items-center gap-4 overflow-x-auto scrollbar-hide pb-2">
-            <span className="text-gray-400 text-sm whitespace-nowrap">分类：</span>
-            {categories.map((cat) => (
-              <button
-                key={cat.value}
-                onClick={() => setSelectedCategory(cat.value)}
-                className={`px-4 py-1.5 rounded-full text-sm whitespace-nowrap transition-colors ${
-                  selectedCategory === cat.value
-                    ? 'bg-[#E50914] text-white'
-                    : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-                }`}
-              >
-                {cat.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="flex items-center gap-4 overflow-x-auto scrollbar-hide mt-3">
-            <span className="text-gray-400 text-sm whitespace-nowrap">类型：</span>
-            {types.map((type) => (
-              <button
-                key={type}
-                onClick={() => setSelectedType(type)}
-                className={`px-3 py-1 rounded-full text-sm whitespace-nowrap transition-colors ${
-                  selectedType === type
-                    ? 'bg-white text-black'
-                    : 'bg-gray-800/50 text-gray-400 hover:bg-gray-800'
-                }`}
-              >
-                {type}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Content Grid */}
-      <div className="max-w-[1920px] mx-auto px-4 sm:px-8 py-8">
-        {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <Loader2 className="w-10 h-10 text-[#E50914] animate-spin" />
-          </div>
-        ) : (
-          <>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-6">
-              {items.map((item, index) => (
-                <ContentCard
-                  key={`${item.id}-${index}`}
-                  title={item.title}
-                  cover={item.cover}
-                  rating={item.rate}
-                  year={item.year}
-                  type="variety"
-                />
-              ))}
-            </div>
-
-            {items.length === 0 && !loading && (
-              <div className="text-center py-20 text-gray-500">
-                暂无相关内容
-              </div>
-            )}
-
-            <div ref={loadingRef} className="flex justify-center py-8">
-              {loadingMore && (
-                <Loader2 className="w-8 h-8 text-[#E50914] animate-spin" />
-              )}
-            </div>
-
-            {!hasMore && items.length > 0 && (
-              <div className="text-center py-8 text-gray-500">
-                已加载全部内容
-              </div>
-            )}
-          </>
-        )}
-      </div>
-    </main>
+    <BrowsePage
+      title='综艺'
+      subtitle='热门综艺 · 欢乐不停 · 精彩不断'
+      kind='variety'
+      filterGroups={filterGroups}
+      sortOptions={sortOptions}
+      heroGradient='from-yellow-600/20'
+      icon={<Smile className='w-16 h-16 text-yellow-500' />}
+    />
   );
 }

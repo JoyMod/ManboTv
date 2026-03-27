@@ -40,6 +40,6 @@ ENV HOSTNAME="0.0.0.0"
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD wget -q --spider http://localhost:3000/ || exit 1
+    CMD wget -q --spider http://127.0.0.1:3000/login || exit 1
 
 CMD ["node", "server.js"]

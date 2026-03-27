@@ -117,14 +117,25 @@ function handleAuthFailure(
 
 // 判断是否需要跳过认证的路径
 function shouldSkipAuth(pathname: string): boolean {
+  if (/\.(svg|png|jpg|jpeg|webp|gif|ico|txt|xml|json)$/i.test(pathname)) {
+    return true;
+  }
+
   const skipPaths = [
     '/_next',
     '/favicon.ico',
+    '/favicon.svg',
+    '/help',
+    '/privacy',
+    '/register',
     '/robots.txt',
     '/manifest.json',
     '/icons/',
     '/logo.png',
     '/screenshot.png',
+    '/terms',
+    '/placeholder-poster.svg',
+    '/placeholder-backdrop.svg',
   ];
 
   return skipPaths.some((path) => pathname.startsWith(path));
@@ -134,6 +145,6 @@ function shouldSkipAuth(pathname: string): boolean {
 export const config = {
   matcher: [
     // 排除静态资源、登录相关页面、以及所有 API 路由（API 认证由后端处理）
-    '/((?!_next/static|_next/image|favicon.ico|login|warning|api/).*)',
+    '/((?!_next/static|_next/image|favicon.ico|favicon.svg|help|login|privacy|register|terms|warning|api/|.*\\.(?:svg|png|jpg|jpeg|webp|gif|ico|txt|xml|json)$).*)',
   ],
 };

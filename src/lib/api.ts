@@ -1,15 +1,22 @@
-/* eslint-disable no-console */
 /**
  * API 配置服务
  * 支持 Next.js API (开发模式) 或 Go 后端 (生产/部署模式)
  */
+
+declare global {
+  interface Window {
+    RUNTIME_CONFIG?: {
+      API_BASE_URL?: string;
+    };
+  }
+}
 
 // API 基础 URL 配置
 // 默认使用相对路径 (同域) 或从环境变量读取
 const getBaseURL = (): string => {
   // 浏览器端从 window 读取运行时配置
   if (typeof window !== 'undefined') {
-    const runtimeConfig = (window as any).RUNTIME_CONFIG;
+    const runtimeConfig = window.RUNTIME_CONFIG;
     if (runtimeConfig?.API_BASE_URL) {
       return runtimeConfig.API_BASE_URL;
     }
@@ -68,9 +75,6 @@ export const getApiUrl = (path: string): string => {
 // 封装 fetch 请求
 export const apiFetch = async (path: string, options?: RequestInit): Promise<Response> => {
   const url = getApiUrl(path);
-  
-  console.log('[API] Request:', url);
-  
   const response = await fetch(url, {
     ...options,
     headers: {
@@ -97,8 +101,7 @@ export const healthCheck = async (): Promise<boolean> => {
       credentials: 'include',
     });
     return response.ok;
-  } catch (error) {
-    console.error('[API] Health check failed:', error);
+  } catch {
     return false;
   }
 };
@@ -113,6 +116,7 @@ export const apiPaths = {
 
   // 搜索
   search: '/search',
+  searchBootstrap: '/search/bootstrap',
   searchOne: '/search/one',
   searchSites: '/search/sites',
   searchSuggestions: '/search/suggestions',
@@ -120,6 +124,7 @@ export const apiPaths = {
   // 详情
   detail: '/detail',
   details: '/details',
+  playBootstrap: '/play/bootstrap',
 
   // 图片
   image: '/image',
@@ -133,6 +138,7 @@ export const apiPaths = {
 
   // 收藏
   favorites: '/favorites',
+  favoritesBootstrap: '/favorites/bootstrap',
 
   // 播放记录
   playrecords: '/playrecords',

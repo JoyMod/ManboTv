@@ -1,8 +1,6 @@
-version: '3.8'
-
 # ManboTV 完整部署配置
-# 包含: 前端(nginx) + Go后端 + Redis
-# 
+# 包含: Next.js前端 + Go后端 + Redis
+#
 # 使用方法:
 # 1. 构建: docker-compose build
 # 2. 启动: docker-compose up -d
@@ -26,7 +24,7 @@ services:
       --save 300 10
       --save 60 10000
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ['CMD', 'redis-cli', 'ping']
       interval: 10s
       timeout: 3s
       retries: 3
@@ -46,36 +44,37 @@ services:
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8080
       - SERVER_MODE=release
-      
+
       # Redis 配置
       - REDIS_ADDR=redis:6379
       - REDIS_PASSWORD=
       - REDIS_DB=0
-      
+
       # 日志配置
       - LOG_LEVEL=info
       - LOG_FORMAT=json
-      
+
       # 认证配置 (请修改默认密码!)
       - AUTH_COOKIE_NAME=auth
       - AUTH_TOKEN_EXPIRE_HOURS=168
-      
+
       # 管理员账号 (首次启动后请修改!)
       - USERNAME=${USERNAME:-admin}
-      - PASSWORD=${PASSWORD:-admin123}
+      - PASSWORD=${PASSWORD:-admin888}
     depends_on:
       redis:
         condition: service_healthy
     networks:
       - manbotv-network
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/api/v1/health"]
+      test:
+        ['CMD', 'wget', '-q', '--spider', 'http://localhost:8080/api/v1/health']
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
 
-  # 前端 (Nginx)
+  # Next.js 前端
   web:
     build:
       context: .
@@ -83,17 +82,20 @@ services:
     container_name: manbotv-web
     restart: unless-stopped
     ports:
-      - "${WEB_PORT:-3000}:3000"
+      - '${PORT:-3000}:3000'
     environment:
       # API 地址 (容器内部通信)
       - API_BASE_URL=http://api:8080
+      - NEXT_PUBLIC_API_BASE_URL=
+      - NEXT_PUBLIC_STORAGE_TYPE=redis
+      - PASSWORD=${PASSWORD:-admin888}
     depends_on:
       api:
         condition: service_healthy
     networks:
       - manbotv-network
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/"]
+      test: ['CMD', 'wget', '-q', '--spider', 'http://127.0.0.1:3000/login']
       interval: 30s
       timeout: 3s
       retries: 3

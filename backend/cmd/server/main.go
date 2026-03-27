@@ -106,10 +106,29 @@ func main() {
 
 	// 初始化处理器
 	searchHandler := handler.NewSearchHandler(searchService, logger, defaultSites, adminStorageService, ownerUser)
+	searchBootstrapHandler := handler.NewSearchBootstrapHandler(
+		searchService,
+		suggestionService,
+		storageService,
+		logger,
+		defaultSites,
+		adminStorageService,
+		ownerUser,
+	)
 	imageHandler := handler.NewImageHandler(imageService, logger)
 	favoriteHandler := handler.NewFavoriteHandler(storageService, logger)
+	favoritesBootstrapHandler := handler.NewFavoritesBootstrapHandler(storageService, logger)
 	recordHandler := handler.NewRecordHandler(storageService, logger)
 	detailHandler := handler.NewDetailHandler(detailService, logger, defaultSites, adminStorageService, ownerUser)
+	playBootstrapHandler := handler.NewPlayBootstrapHandler(
+		detailService,
+		searchService,
+		storageService,
+		logger,
+		defaultSites,
+		adminStorageService,
+		ownerUser,
+	)
 	proxyHandler := handler.NewProxyHandler(m3u8Service, segmentService, logger)
 	authHandler := handler.NewAuthHandler(
 		cfg.Auth.CookieName,
@@ -123,8 +142,17 @@ func main() {
 	searchHistoryHandler := handler.NewSearchHistoryHandler(storageService, logger)
 	skipConfigHandler := handler.NewSkipConfigHandler(storageService, logger)
 	doubanHandler := handler.NewDoubanHandler(logger)
+	posterHandler := handler.NewPosterHandler(
+		searchService,
+		logger,
+		defaultSites,
+		adminStorageService,
+		ownerUser,
+		redisClient,
+	)
 	liveHandler := handler.NewLiveHandler(liveService, logger)
 	legacySystemHandler := handler.NewLegacySystemHandler(adminStorageService, logger)
+	browseBootstrapHandler := handler.NewBrowseBootstrapHandler(logger)
 
 	// Admin Handlers
 	adminHandler := handler.NewAdminHandler(
@@ -209,6 +237,7 @@ func main() {
 		// 图片代理 (公开)
 		apiV1.GET("/image", imageHandler.Proxy)
 		apiV1.GET("/image/header", imageHandler.ProxyWithHeader)
+		apiV1.GET("/poster/recover", posterHandler.Recover)
 
 		// 视频代理 (公开)
 		apiV1.GET("/proxy/m3u8", proxyHandler.ProxyM3U8)
@@ -220,6 +249,7 @@ func main() {
 		apiV1.GET("/douban", doubanHandler.Search)
 		apiV1.GET("/douban/recommends", doubanHandler.GetRecommends)
 		apiV1.GET("/douban/categories", doubanHandler.GetCategories)
+		apiV1.GET("/browse/bootstrap", browseBootstrapHandler.GetBootstrap)
 
 		// 需要认证的接口
 		authorized := apiV1.Group("/")
@@ -233,6 +263,9 @@ func main() {
 			authorized.GET("/favorites", favoriteHandler.GetFavorites)
 			authorized.POST("/favorites", favoriteHandler.AddFavorite)
 			authorized.DELETE("/favorites/:key", favoriteHandler.DeleteFavorite)
+			authorized.GET("/favorites/bootstrap", favoritesBootstrapHandler.GetBootstrap)
+			authorized.GET("/play/bootstrap", playBootstrapHandler.GetBootstrap)
+			authorized.GET("/search/bootstrap", searchBootstrapHandler.GetBootstrap)
 
 			// 播放记录相关
 			authorized.GET("/playrecords", recordHandler.GetRecords)
@@ -316,6 +349,7 @@ func main() {
 		apiLegacy.GET("/image-proxy", imageHandler.Proxy)
 		apiLegacy.GET("/image", imageHandler.Proxy)
 		apiLegacy.GET("/image/header", imageHandler.ProxyWithHeader)
+		apiLegacy.GET("/poster/recover", posterHandler.RecoverLegacy)
 
 		// 视频代理 (公开)
 		apiLegacy.GET("/proxy/m3u8", proxyHandler.ProxyM3U8)
@@ -331,6 +365,7 @@ func main() {
 		// 其他公开接口
 		apiLegacy.GET("/server-config", legacySystemHandler.GetServerConfig)
 		apiLegacy.GET("/home", legacySystemHandler.GetHome)
+		apiLegacy.GET("/browse/bootstrap", browseBootstrapHandler.GetBootstrapLegacy)
 		apiLegacy.GET("/bangumi/calendar", legacySystemHandler.GetBangumiCalendar)
 		apiLegacy.GET("/cron", legacySystemHandler.RunCron)
 
@@ -345,6 +380,9 @@ func main() {
 			authorizedLegacy.GET("/favorites", favoriteHandler.GetFavoritesLegacy)
 			authorizedLegacy.POST("/favorites", favoriteHandler.AddFavoriteLegacy)
 			authorizedLegacy.DELETE("/favorites", favoriteHandler.DeleteFavoriteLegacy)
+			authorizedLegacy.GET("/favorites/bootstrap", favoritesBootstrapHandler.GetBootstrapLegacy)
+			authorizedLegacy.GET("/search/bootstrap", searchBootstrapHandler.GetBootstrapLegacy)
+			authorizedLegacy.GET("/play/bootstrap", playBootstrapHandler.GetBootstrapLegacy)
 
 			// 播放记录相关
 			authorizedLegacy.GET("/playrecords", recordHandler.GetRecordsLegacy)

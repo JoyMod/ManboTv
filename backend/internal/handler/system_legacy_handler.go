@@ -71,32 +71,10 @@ func (h *LegacySystemHandler) GetServerConfig(c *gin.Context) {
 
 // GetHome handles GET /api/home.
 func (h *LegacySystemHandler) GetHome(c *gin.Context) {
-	banner := []gin.H{
-		{
-			"id":          "1",
-			"title":       "曼波TV 独家首播",
-			"subtitle":    "热门大片 · 全网同步",
-			"description": "汇聚全网最新最热影视资源，高清画质流畅播放。",
-			"backdrop":    "https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=1920&q=80",
-			"rating":      "9.8分",
-			"year":        "2026",
-			"tags":        []string{"热门", "独家"},
-		},
-		{
-			"id":          "2",
-			"title":       "经典动漫剧场",
-			"subtitle":    "热血回忆 · 青春不败",
-			"description": "经典动漫作品全收录，重温那些年追过的热血与感动。",
-			"backdrop":    "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=1920&q=80",
-			"rating":      "9.6分",
-			"year":        "经典",
-			"tags":        []string{"动漫", "经典"},
-		},
-	}
-
+	sections := buildHomeSections(c.Request.Context(), h.httpClient, h.logger)
 	c.JSON(http.StatusOK, gin.H{
-		"banner":   banner,
-		"sections": []gin.H{},
+		"banner":   buildHomeBanner(sections),
+		"sections": sections,
 	})
 }
 

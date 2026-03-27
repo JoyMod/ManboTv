@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 450" role="img" aria-label="No poster">
+  <defs>
+    <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#1f1f1f"/>
+      <stop offset="100%" stop-color="#0f0f0f"/>
+    </linearGradient>
+  </defs>
+  <rect width="300" height="450" fill="url(#g)"/>
+  <rect x="42" y="62" width="216" height="326" rx="10" fill="none" stroke="#2f2f2f" stroke-width="2"/>
+  <polygon points="128,190 128,262 188,226" fill="#e50914"/>
+  <text x="150" y="310" fill="#a3a3a3" font-size="16" text-anchor="middle" font-family="Arial, sans-serif">ManboTV</text>
+</svg>

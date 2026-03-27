@@ -77,8 +77,13 @@ func (h *DetailHandler) GetDetail(c *gin.Context) {
 		c.JSON(http.StatusOK, model.Error(model.CodeInternalError, "获取详情失败"))
 		return
 	}
+	filteredDetail, ok := filterResult(*detail, resolveContentPolicyFromRequest(c, h.adminStorage))
+	if !ok {
+		c.JSON(http.StatusOK, model.Error(model.CodeNotFound, "影片不存在或不可访问"))
+		return
+	}
 
-	c.JSON(http.StatusOK, model.Success(detail))
+	c.JSON(http.StatusOK, model.Success(filteredDetail))
 }
 
 // GetDetails 从多个源获取详情
@@ -100,6 +105,7 @@ func (h *DetailHandler) GetDetails(c *gin.Context) {
 		c.JSON(http.StatusOK, model.Error(model.CodeInternalError, "获取详情失败"))
 		return
 	}
+	details = filterDetails(details, resolveContentPolicyFromRequest(c, h.adminStorage))
 
 	c.JSON(http.StatusOK, model.Success(details))
 }

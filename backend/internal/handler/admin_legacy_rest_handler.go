@@ -14,16 +14,18 @@ import (
 )
 
 type legacySiteConfig struct {
-	SiteName                string `json:"SiteName"`
-	Announcement            string `json:"Announcement"`
-	SearchDownstreamMaxPage int    `json:"SearchDownstreamMaxPage"`
-	SiteInterfaceCacheTime  int    `json:"SiteInterfaceCacheTime"`
-	DoubanProxyType         string `json:"DoubanProxyType"`
-	DoubanProxy             string `json:"DoubanProxy"`
-	DoubanImageProxyType    string `json:"DoubanImageProxyType"`
-	DoubanImageProxy        string `json:"DoubanImageProxy"`
-	DisableYellowFilter     bool   `json:"DisableYellowFilter"`
-	FluidSearch             bool   `json:"FluidSearch"`
+	SiteName                string   `json:"SiteName"`
+	Announcement            string   `json:"Announcement"`
+	SearchDownstreamMaxPage int      `json:"SearchDownstreamMaxPage"`
+	SiteInterfaceCacheTime  int      `json:"SiteInterfaceCacheTime"`
+	DoubanProxyType         string   `json:"DoubanProxyType"`
+	DoubanProxy             string   `json:"DoubanProxy"`
+	DoubanImageProxyType    string   `json:"DoubanImageProxyType"`
+	DoubanImageProxy        string   `json:"DoubanImageProxy"`
+	DisableYellowFilter     bool     `json:"DisableYellowFilter"`
+	FluidSearch             bool     `json:"FluidSearch"`
+	ContentAccessMode       string   `json:"ContentAccessMode"`
+	BlockedContentTags      []string `json:"BlockedContentTags"`
 }
 
 type legacyConfigSubscription struct {
@@ -90,6 +92,8 @@ func (h *AdminLegacyHandler) HandleConfigGet(c *gin.Context) {
 			"DoubanImageProxy":        config.SiteConfig.DoubanImageProxy,
 			"DisableYellowFilter":     config.SiteConfig.DisableYellowFilter,
 			"FluidSearch":             config.SiteConfig.FluidSearch,
+			"ContentAccessMode":       config.SiteConfig.ContentAccessMode,
+			"BlockedContentTags":      config.SiteConfig.BlockedContentTags,
 		},
 		"UserConfig": gin.H{
 			"Users": legacyUsers,
@@ -162,6 +166,14 @@ func (h *AdminLegacyHandler) HandleConfigPut(c *gin.Context) {
 			c.JSON(http.StatusOK, model.Error(model.CodeInvalidParams, "站点配置格式无效"))
 			return
 		}
+		contentAccessMode := payload.ContentAccessMode
+		if strings.TrimSpace(contentAccessMode) == "" {
+			if payload.DisableYellowFilter {
+				contentAccessMode = model.ContentAccessModeMixed
+			} else {
+				contentAccessMode = model.ContentAccessModeSafe
+			}
+		}
 		config.SiteConfig = model.SiteConfig{
 			SiteName:                payload.SiteName,
 			Announcement:            payload.Announcement,
@@ -171,8 +183,10 @@ func (h *AdminLegacyHandler) HandleConfigPut(c *gin.Context) {
 			DoubanProxy:             payload.DoubanProxy,
 			DoubanImageProxyType:    payload.DoubanImageProxyType,
 			DoubanImageProxy:        payload.DoubanImageProxy,
-			DisableYellowFilter:     payload.DisableYellowFilter,
+			DisableYellowFilter:     contentAccessMode != model.ContentAccessModeSafe,
 			FluidSearch:             payload.FluidSearch,
+			ContentAccessMode:       contentAccessMode,
+			BlockedContentTags:      payload.BlockedContentTags,
 		}
 	}
 

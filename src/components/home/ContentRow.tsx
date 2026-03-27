@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useRef, useState } from 'react';
-import { motion } from 'framer-motion';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import ContentCard from './ContentCard';
+import Link from 'next/link';
+import React, { useRef, useState } from 'react';
+
+import ContentCard from '@/components/ui/ContentCard';
 
 interface ContentItem {
   id: string;
@@ -12,119 +13,110 @@ interface ContentItem {
   rating?: string;
   year?: string;
   type?: 'movie' | 'tv' | 'variety' | 'anime';
-  duration?: string;
-  episodes?: string;
-  overview?: string;
+  source?: string;
 }
 
 interface ContentRowProps {
   title: string;
   items: ContentItem[];
   showRanking?: boolean;
+  description?: string;
+  href?: string;
 }
 
 export const ContentRow: React.FC<ContentRowProps> = ({
   title,
   items,
   showRanking = false,
+  description,
+  href,
 }) => {
-  const rowRef = useRef<HTMLDivElement>(null);
-  const [canScrollLeft, setCanScrollLeft] = useState(false);
-  const [canScrollRight, setCanScrollRight] = useState(true);
+  const ref = useRef<HTMLDivElement>(null);
+  const [left, setLeft] = useState(false);
+  const [right, setRight] = useState(true);
 
-  const checkScrollButtons = () => {
-    if (rowRef.current) {
-      const { scrollLeft, scrollWidth, clientWidth } = rowRef.current;
-      setCanScrollLeft(scrollLeft > 0);
-      setCanScrollRight(scrollLeft < scrollWidth - clientWidth - 10);
-    }
+  const check = () => {
+    if (!ref.current) return;
+    const { scrollLeft, scrollWidth, clientWidth } = ref.current;
+    setLeft(scrollLeft > 0);
+    setRight(scrollLeft + clientWidth < scrollWidth - 8);
   };
 
-  const scroll = (direction: 'left' | 'right') => {
-    if (rowRef.current) {
-      const scrollAmount = direction === 'left' ? -800 : 800;
-      rowRef.current.scrollBy({ left: scrollAmount, behavior: 'smooth' });
-      setTimeout(checkScrollButtons, 400);
-    }
+  const slide = (dir: 'l' | 'r') => {
+    if (!ref.current) return;
+    ref.current.scrollBy({
+      left: dir === 'l' ? -900 : 900,
+      behavior: 'smooth',
+    });
+    window.setTimeout(check, 260);
   };
 
   return (
-    <div className="group relative py-4">
-      {/* 标题 */}
-      <div className="flex items-center justify-between px-4 sm:px-8 mb-4">
-        <h2 className="text-lg sm:text-xl md:text-2xl font-bold text-white flex items-center gap-2">
-          {title}
-          <ChevronRight className="w-5 h-5 text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity" />
-        </h2>
-        <span className="text-sm text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity">
-          查看全部
-        </span>
+    <section className='group relative py-3'>
+      <div className='mb-3 flex items-center justify-between px-4 sm:px-8'>
+        <div>
+          <h2 className='text-lg font-bold text-white sm:text-2xl'>{title}</h2>
+          {description ? (
+            <p className='mt-1 text-sm text-zinc-400'>{description}</p>
+          ) : null}
+        </div>
+        {href ? (
+          <Link
+            href={href}
+            className='hidden rounded-full border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition-colors hover:border-zinc-500 hover:text-white sm:inline-flex'
+          >
+            查看更多
+          </Link>
+        ) : null}
       </div>
 
-      {/* 滚动容器 */}
-      <div className="relative">
-        {/* 左箭头 */}
-        <motion.button
-          initial={{ opacity: 0 }}
-          animate={{ opacity: canScrollLeft ? 1 : 0 }}
-          whileHover={{ scale: 1.1 }}
-          onClick={() => scroll('left')}
-          className={`absolute left-0 top-0 bottom-0 z-40 w-12 sm:w-16 bg-black/50 backdrop-blur-sm flex items-center justify-center transition-opacity ${
-            canScrollLeft ? 'cursor-pointer' : 'pointer-events-none'
+      <div className='relative'>
+        <button
+          onClick={() => slide('l')}
+          className={`absolute left-0 top-0 z-20 h-full w-12 bg-black/55 text-white transition-opacity ${
+            left ? 'opacity-100' : 'pointer-events-none opacity-0'
           }`}
         >
-          <ChevronLeft className="w-8 h-8 text-white" />
-        </motion.button>
-
-        {/* 右箭头 */}
-        <motion.button
-          initial={{ opacity: 0 }}
-          animate={{ opacity: canScrollRight ? 1 : 0 }}
-          whileHover={{ scale: 1.1 }}
-          onClick={() => scroll('right')}
-          className={`absolute right-0 top-0 bottom-0 z-40 w-12 sm:w-16 bg-black/50 backdrop-blur-sm flex items-center justify-center transition-opacity ${
-            canScrollRight ? 'cursor-pointer' : 'pointer-events-none'
+          <ChevronLeft className='mx-auto h-6 w-6' />
+        </button>
+        <button
+          onClick={() => slide('r')}
+          className={`absolute right-0 top-0 z-20 h-full w-12 bg-black/55 text-white transition-opacity ${
+            right ? 'opacity-100' : 'pointer-events-none opacity-0'
           }`}
         >
-          <ChevronRight className="w-8 h-8 text-white" />
-        </motion.button>
+          <ChevronRight className='mx-auto h-6 w-6' />
+        </button>
 
-        {/* 卡片列表 */}
         <div
-          ref={rowRef}
-          onScroll={checkScrollButtons}
-          className="flex gap-2 sm:gap-4 overflow-x-auto scrollbar-hide px-4 sm:px-8 pb-8"
-          style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+          ref={ref}
+          onScroll={check}
+          className='scrollbar-hide flex gap-3 overflow-x-auto px-4 pb-4 sm:px-8'
         >
-          {items.map((item, index) => (
-            <div key={item.id} className="flex items-center">
-              {/* 排名数字 */}
-              {showRanking && index < 10 && (
-                <span
-                  className="text-6xl sm:text-7xl md:text-8xl font-black text-gray-800 mr-2 sm:mr-4 italic"
-                  style={{
-                    WebkitTextStroke: '2px #4a4a4a',
-                    textShadow: '2px 2px 4px rgba(0,0,0,0.5)',
-                  }}
-                >
-                  {index + 1}
-                </span>
+          {items.map((item, idx) => (
+            <div
+              key={`${item.id}-${idx}`}
+              className='w-[140px] flex-none sm:w-[180px]'
+            >
+              {showRanking && idx < 10 && (
+                <div className='mb-1 text-xs font-semibold text-red-500'>
+                  TOP {idx + 1}
+                </div>
               )}
               <ContentCard
+                id={item.id}
+                source={item.source}
                 title={item.title}
                 cover={item.cover}
                 rating={item.rating}
                 year={item.year}
                 type={item.type}
-                duration={item.duration}
-                episodes={item.episodes}
-                overview={item.overview}
               />
             </div>
           ))}
         </div>
       </div>
-    </div>
+    </section>
   );
 };
 

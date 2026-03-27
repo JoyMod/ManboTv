@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -26,10 +27,10 @@ type DetailService interface {
 
 // detailService 详情服务实现
 type detailService struct {
-	client     *http.Client
-	config     *config.SearchConfig
-	logger     *zap.Logger
-	m3u8Regex  *regexp.Regexp
+	client    *http.Client
+	config    *config.SearchConfig
+	logger    *zap.Logger
+	m3u8Regex *regexp.Regexp
 }
 
 // NewDetailService 创建详情服务
@@ -56,13 +57,83 @@ func NewDetailService(cfg *config.SearchConfig, httpCfg *config.HTTPClientConfig
 
 // GetDetail 获取单个源的详情
 func (s *detailService) GetDetail(ctx context.Context, site model.ApiSite, vodID string) (*model.SearchResult, error) {
-	// 特殊源处理
-	if site.Detail != "" {
-		return s.getSpecialDetail(ctx, site, vodID)
+	var apiDetail *model.SearchResult
+	var apiErr error
+
+	if strings.TrimSpace(site.API) != "" {
+		apiDetail, apiErr = s.getAPIDetail(ctx, site, vodID)
+		if apiErr == nil && apiDetail != nil && (len(apiDetail.Episodes) > 0 || site.Detail == "") {
+			return apiDetail, nil
+		}
 	}
 
-	// 标准API获取详情
-	detailURL := fmt.Sprintf("%s?ac=videolist&ids=%s", site.API, vodID)
+	if strings.TrimSpace(site.Detail) == "" {
+		if apiErr != nil {
+			return nil, apiErr
+		}
+		return apiDetail, nil
+	}
+
+	htmlDetail, htmlErr := s.getSpecialDetail(ctx, site, vodID)
+	if htmlErr == nil {
+		if apiDetail != nil {
+			return mergeDetailResult(apiDetail, htmlDetail), nil
+		}
+		return htmlDetail, nil
+	}
+
+	if apiErr == nil && apiDetail != nil {
+		return apiDetail, nil
+	}
+	if apiErr != nil {
+		return nil, fmt.Errorf("API详情失败: %w; HTML详情失败: %v", apiErr, htmlErr)
+	}
+	return nil, htmlErr
+}
+
+// GetDetails 从多个源获取详情
+func (s *detailService) GetDetails(ctx context.Context, sites []model.ApiSite, vodID string) ([]*model.SearchResult, error) {
+	var results []*model.SearchResult
+	var mu sync.Mutex
+
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(5) // 限制并发数
+
+	for _, site := range sites {
+		site := site
+		g.Go(func() error {
+			detail, err := s.GetDetail(ctx, site, vodID)
+			if err != nil {
+				s.logger.Warn("获取详情失败",
+					zap.String("site", site.Name),
+					zap.String("vod_id", vodID),
+					zap.Error(err),
+				)
+				return nil // 单个源失败不中断
+			}
+
+			mu.Lock()
+			results = append(results, detail)
+			mu.Unlock()
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}
+
+func (s *detailService) getAPIDetail(ctx context.Context, site model.ApiSite, vodID string) (*model.SearchResult, error) {
+	detailURL, err := appendProviderQuery(site.API, url.Values{
+		"ac":  {"videolist"},
+		"ids": {vodID},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("构建详情URL失败: %w", err)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, detailURL, nil)
 	if err != nil {
@@ -99,7 +170,6 @@ func (s *detailService) GetDetail(ctx context.Context, site model.ApiSite, vodID
 	videoDetail := apiResp.List[0]
 	episodes, titles := s.parseEpisodes(videoDetail.VodPlayURL)
 
-	// 如果从播放URL没有解析到，尝试从内容中解析
 	if len(episodes) == 0 && videoDetail.VodContent != "" {
 		matches := s.m3u8Regex.FindAllString(videoDetail.VodContent, -1)
 		for _, match := range matches {
@@ -107,10 +177,10 @@ func (s *detailService) GetDetail(ctx context.Context, site model.ApiSite, vodID
 		}
 	}
 
-	return &model.SearchResult{
+	result := model.SearchResult{
 		ID:             vodID,
 		Title:          strings.TrimSpace(videoDetail.VodName),
-		Poster:         videoDetail.VodPic,
+		Poster:         normalizeMediaURL(videoDetail.VodPic, site.API),
 		Episodes:       episodes,
 		EpisodesTitles: titles,
 		Source:         site.Key,
@@ -119,43 +189,47 @@ func (s *detailService) GetDetail(ctx context.Context, site model.ApiSite, vodID
 		Year:           s.extractYear(videoDetail.VodYear),
 		Desc:           s.cleanHTML(videoDetail.VodContent),
 		TypeName:       videoDetail.TypeName,
-		DoubanID:       videoDetail.VodDoubanID,
-	}, nil
+		DoubanID:       int(videoDetail.VodDoubanID),
+	}
+	enriched := EnrichSearchResult(result)
+	return &enriched, nil
 }
 
-// GetDetails 从多个源获取详情
-func (s *detailService) GetDetails(ctx context.Context, sites []model.ApiSite, vodID string) ([]*model.SearchResult, error) {
-	var results []*model.SearchResult
-	var mu sync.Mutex
-
-	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(5) // 限制并发数
-
-	for _, site := range sites {
-		site := site
-		g.Go(func() error {
-			detail, err := s.GetDetail(ctx, site, vodID)
-			if err != nil {
-				s.logger.Warn("获取详情失败",
-					zap.String("site", site.Name),
-					zap.String("vod_id", vodID),
-					zap.Error(err),
-				)
-				return nil // 单个源失败不中断
-			}
-
-			mu.Lock()
-			results = append(results, detail)
-			mu.Unlock()
-			return nil
-		})
+func mergeDetailResult(primary, fallback *model.SearchResult) *model.SearchResult {
+	if primary == nil {
+		return fallback
+	}
+	if fallback == nil {
+		return primary
 	}
 
-	if err := g.Wait(); err != nil {
-		return nil, err
+	merged := *primary
+	if strings.TrimSpace(merged.Title) == "" {
+		merged.Title = fallback.Title
 	}
-
-	return results, nil
+	if strings.TrimSpace(merged.Poster) == "" {
+		merged.Poster = fallback.Poster
+	}
+	if len(merged.Episodes) == 0 {
+		merged.Episodes = fallback.Episodes
+	}
+	if len(merged.EpisodesTitles) == 0 {
+		merged.EpisodesTitles = fallback.EpisodesTitles
+	}
+	if strings.TrimSpace(merged.Class) == "" {
+		merged.Class = fallback.Class
+	}
+	if strings.TrimSpace(merged.Year) == "" || merged.Year == "unknown" {
+		merged.Year = fallback.Year
+	}
+	if strings.TrimSpace(merged.Desc) == "" {
+		merged.Desc = fallback.Desc
+	}
+	if strings.TrimSpace(merged.TypeName) == "" {
+		merged.TypeName = fallback.TypeName
+	}
+	enriched := EnrichSearchResult(merged)
+	return &enriched
 }
 
 // getSpecialDetail 处理特殊源详情
@@ -228,8 +302,15 @@ func (s *detailService) getSpecialDetail(ctx context.Context, site model.ApiSite
 	}
 
 	// 提取封面
-	coverRegex := regexp.MustCompile(`(https?://[^"'\s]+?\.jpg)`)
+	coverRegex := regexp.MustCompile(`(?i)(https?://[^"'\s]+?\.(jpg|jpeg|png|webp))`)
 	coverMatch := coverRegex.FindString(html)
+	if coverMatch == "" {
+		metaImageRegex := regexp.MustCompile(`(?i)<meta[^>]+(?:property|name)=["'](?:og:image|twitter:image)["'][^>]+content=["']([^"']+)["']`)
+		metaImageMatch := metaImageRegex.FindStringSubmatch(html)
+		if len(metaImageMatch) > 1 {
+			coverMatch = strings.TrimSpace(metaImageMatch[1])
+		}
+	}
 
 	// 提取年份
 	yearRegex := regexp.MustCompile(`>(\d{4})<`)
@@ -239,17 +320,19 @@ func (s *detailService) getSpecialDetail(ctx context.Context, site model.ApiSite
 		year = yearMatch[1]
 	}
 
-	return &model.SearchResult{
+	result := model.SearchResult{
 		ID:             vodID,
 		Title:          title,
-		Poster:         coverMatch,
+		Poster:         normalizeMediaURL(coverMatch, site.Detail),
 		Episodes:       episodes,
 		EpisodesTitles: s.generateEpisodeTitles(len(episodes)),
 		Source:         site.Key,
 		SourceName:     site.Name,
 		Year:           year,
 		Desc:           desc,
-	}, nil
+	}
+	enriched := EnrichSearchResult(result)
+	return &enriched, nil
 }
 
 // parseEpisodes 解析剧集
