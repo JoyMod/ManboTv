@@ -165,6 +165,20 @@ function LoginPageClient() {
               隐私政策
             </Link>
           </div>
+          <div className='mt-6 rounded-xl border border-netflix-gray-800 bg-black/40 p-4 text-xs leading-6 text-netflix-gray-500'>
+            <p>
+              本站仅提供程序功能与聚合入口，不存储、不制作、不上传影视内容。
+            </p>
+            <p className='mt-2'>
+              相关搜索结果、封面、详情与播放链接可能来自用户配置或第三方公开接口；如权利人认为存在侵权，请联系管理员处理，核实后将尽快删除、屏蔽或断开相关链接。
+            </p>
+            <p className='mt-2'>
+              请在下载、缓存或访问相关内容后 24 小时内自行删除，并确保使用行为符合所在地法律法规。
+            </p>
+            <p className='mt-2'>
+              严禁在中国大陆法律管辖范围内传播本项目或将其发布至抖音、哔哩哔哩、小红书、微博、视频号等中国大陆平台。
+            </p>
+          </div>
         </div>
       </footer>
     </div>
