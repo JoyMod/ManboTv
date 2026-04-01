@@ -7,6 +7,23 @@ import { Suspense, useState } from 'react';
 
 import Logo from '@/components/ui/Logo';
 
+const DefaultRedirectPath = '/';
+
+function getSafeRedirectPath(rawRedirect: string | null): string {
+  if (!rawRedirect) {
+    return DefaultRedirectPath;
+  }
+
+  const isInternalPath =
+    rawRedirect.startsWith('/') && !rawRedirect.startsWith('//');
+
+  if (!isInternalPath) {
+    return DefaultRedirectPath;
+  }
+
+  return rawRedirect;
+}
+
 function LoginPageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -33,7 +50,11 @@ function LoginPageClient() {
       });
 
       if (res.ok) {
-        const redirect = searchParams.get('redirect') || '/';
+        const redirect = getSafeRedirectPath(searchParams.get('redirect'));
+        if (typeof window !== 'undefined') {
+          window.location.replace(redirect);
+          return;
+        }
         router.replace(redirect);
       } else if (res.status === 401) {
         setError('密码错误');

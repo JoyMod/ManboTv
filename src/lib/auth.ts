@@ -1,5 +1,20 @@
 import { NextRequest } from 'next/server';
 
+function parseAuthCookieValue<T>(rawValue: string): T {
+  let decoded = decodeURIComponent(rawValue);
+
+  // 某些部署环境下 cookie 可能经过双重编码，二次解码失败时回退到单次解码结果。
+  if (decoded.includes('%')) {
+    try {
+      decoded = decodeURIComponent(decoded);
+    } catch (error) {
+      // ignore and keep first-pass decoded string
+    }
+  }
+
+  return JSON.parse(decoded) as T;
+}
+
 // 从cookie获取认证信息 (服务端使用)
 export function getAuthInfoFromCookie(request: NextRequest): {
   password?: string;
@@ -14,9 +29,7 @@ export function getAuthInfoFromCookie(request: NextRequest): {
   }
 
   try {
-    const decoded = decodeURIComponent(authCookie.value);
-    const authData = JSON.parse(decoded);
-    return authData;
+    return parseAuthCookieValue(authCookie.value);
   } catch (error) {
     return null;
   }
@@ -56,16 +69,7 @@ export function getAuthInfoFromBrowserCookie(): {
       return null;
     }
 
-    // 处理可能的双重编码
-    let decoded = decodeURIComponent(authCookie);
-
-    // 如果解码后仍然包含 %，说明是双重编码，需要再次解码
-    if (decoded.includes('%')) {
-      decoded = decodeURIComponent(decoded);
-    }
-
-    const authData = JSON.parse(decoded);
-    return authData;
+    return parseAuthCookieValue(authCookie);
   } catch (error) {
     return null;
   }

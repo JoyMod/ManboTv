@@ -14,6 +14,15 @@ const navItems = [
   { path: '/favorites', label: '收藏', icon: Heart },
 ];
 
+const HiddenPathPrefixes = [
+  '/help',
+  '/login',
+  '/privacy',
+  '/register',
+  '/terms',
+  '/warning',
+];
+
 export default function MobileBottomNav() {
   const pathname = usePathname();
   const { navigate, prefetchHref } = useFastNavigation();
@@ -32,13 +41,23 @@ export default function MobileBottomNav() {
   }, []);
 
   React.useEffect(() => {
+    const shouldHideOnPath = HiddenPathPrefixes.some((prefix) =>
+      pathname.startsWith(prefix)
+    );
+    const shouldEnablePrefetch =
+      isMobile && !pathname.startsWith('/play') && !shouldHideOnPath;
+    if (!shouldEnablePrefetch) {
+      return;
+    }
     navItems.forEach((item) => prefetchHref(item.path));
-  }, [prefetchHref]);
+  }, [isMobile, pathname, prefetchHref]);
 
   if (!isMobile) return null;
 
-  // 在播放页面不显示
-  if (pathname.startsWith('/play')) return null;
+  const shouldHideOnPath = HiddenPathPrefixes.some((prefix) =>
+    pathname.startsWith(prefix)
+  );
+  if (pathname.startsWith('/play') || shouldHideOnPath) return null;
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-zinc-800 bg-zinc-950/95 shadow-[0_-10px_30px_rgba(0,0,0,0.35)] backdrop-blur-md md:hidden">
