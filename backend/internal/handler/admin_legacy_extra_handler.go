@@ -268,6 +268,10 @@ func (h *AdminLegacyHandler) resetAdminConfig(ctx context.Context) error {
 		SiteConfig: model.SiteConfig{
 			SiteName:                "ManboTV",
 			SearchDownstreamMaxPage: 5,
+			SearchSourceTimeoutMs:   4500,
+			SearchMaxConcurrent:     8,
+			SearchDefaultSort:       "smart",
+			SearchEnableStream:      true,
 			SiteInterfaceCacheTime:  3600,
 			FluidSearch:             true,
 		},

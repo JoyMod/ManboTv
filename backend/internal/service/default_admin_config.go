@@ -9,6 +9,9 @@ import (
 
 const (
 	defaultSearchDownstreamMaxPage = 5
+	defaultSearchSourceTimeoutMs   = 4500
+	defaultSearchMaxConcurrent     = 8
+	defaultSearchDefaultSort       = "smart"
 	defaultSiteInterfaceCacheTime  = 3600
 	defaultConfigSubscriptionURL   = "https://raw.githubusercontent.com/hafrey1/LunaTV-config/main/LunaTV-config.txt"
 )
@@ -21,6 +24,10 @@ func newDefaultAdminConfig() *model.AdminConfig {
 		SiteConfig: model.SiteConfig{
 			SiteName:                "ManboTV",
 			SearchDownstreamMaxPage: defaultSearchDownstreamMaxPage,
+			SearchSourceTimeoutMs:   defaultSearchSourceTimeoutMs,
+			SearchMaxConcurrent:     defaultSearchMaxConcurrent,
+			SearchDefaultSort:       defaultSearchDefaultSort,
+			SearchEnableStream:      true,
 			SiteInterfaceCacheTime:  defaultSiteInterfaceCacheTime,
 			FluidSearch:             true,
 			ContentAccessMode:       model.ContentAccessModeSafe,
@@ -51,6 +58,15 @@ func applyDefaultAdminConfig(config *model.AdminConfig) *model.AdminConfig {
 	}
 	if config.SiteConfig.SearchDownstreamMaxPage <= 0 {
 		config.SiteConfig.SearchDownstreamMaxPage = defaultSearchDownstreamMaxPage
+	}
+	if config.SiteConfig.SearchSourceTimeoutMs <= 0 {
+		config.SiteConfig.SearchSourceTimeoutMs = defaultSearchSourceTimeoutMs
+	}
+	if config.SiteConfig.SearchMaxConcurrent <= 0 {
+		config.SiteConfig.SearchMaxConcurrent = defaultSearchMaxConcurrent
+	}
+	if strings.TrimSpace(config.SiteConfig.SearchDefaultSort) == "" {
+		config.SiteConfig.SearchDefaultSort = defaultSearchDefaultSort
 	}
 	if config.SiteConfig.SiteInterfaceCacheTime <= 0 {
 		config.SiteConfig.SiteInterfaceCacheTime = defaultSiteInterfaceCacheTime

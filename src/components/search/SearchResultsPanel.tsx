@@ -1,57 +1,69 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { Filter, Loader2, Power, Zap } from 'lucide-react';
+import { ChevronRight, Loader2, Power, Sparkles, Zap } from 'lucide-react';
 import React, { useEffect, useMemo, useState } from 'react';
 
 import { toProxyImageSrc } from '@/lib/image';
 import { useFastNavigation } from '@/lib/navigation-feedback';
 
 import {
-  aggregateSearchResults,
-  buildAggregateKey,
   qualityScore,
   SearchAggregateGroup,
+  SearchExecutionInfo,
+  SearchFacets,
+  SearchPageInfo,
   SearchResult,
-  sortSearchResults,
+  SearchSourceStatusItem,
   SourceTestResult,
 } from '@/components/search/search-utils';
+import SearchFilterPanel from '@/components/search/SearchFilterPanel';
+import SearchSourceStatusPanel from '@/components/search/SearchSourceStatusPanel';
 import ContentCard from '@/components/ui/ContentCard';
 import SmartImage from '@/components/ui/SmartImage';
 
-type ResultViewMode = 'agg' | 'all';
-type ContentFilter = 'all' | 'movie' | 'tv' | 'variety' | 'anime';
-type SourceFilter = 'all' | 'multi' | 'single';
+type SearchViewMode = 'aggregate' | 'lines' | 'sources';
+type SearchSourceMode = 'all' | 'multi' | 'single';
 
 interface SearchResultsPanelProps {
   query: string;
   loading: boolean;
   results: SearchResult[];
+  aggregates: SearchAggregateGroup[];
+  facets: SearchFacets;
+  execution?: SearchExecutionInfo;
+  pageInfo?: SearchPageInfo;
   searchError: string | null;
-  sourceStatus: Record<string, 'done' | 'error'>;
+  sourceStatusItems: SearchSourceStatusItem[];
   sourceTests: Record<string, SourceTestResult>;
-  viewMode: ResultViewMode;
-  onViewModeChange: (mode: ResultViewMode) => void;
+  viewMode: SearchViewMode;
+  selectedTypes: string[];
+  selectedSources: string[];
+  selectedSort: string;
+  selectedSourceMode: SearchSourceMode;
+  selectedYearFrom?: number;
+  selectedYearTo?: number;
+  onViewModeChange: (mode: SearchViewMode) => void;
+  onSortChange: (value: string) => void;
+  onToggleType: (value: string) => void;
+  onToggleSource: (value: string) => void;
+  onSourceModeChange: (value: SearchSourceMode) => void;
+  onYearRangeApply: (yearFrom?: number, yearTo?: number) => void;
+  onResetFilters: () => void;
+  onLoadMore: () => void;
 }
 
-const INITIAL_AGG_PAGE_SIZE = 18;
-const INITIAL_ALL_PAGE_SIZE = 24;
-const PAGE_SIZE_STEP = 18;
+const INITIAL_AGGREGATE_LIMIT = 18;
+const INITIAL_SOURCE_LIMIT = 12;
+const INITIAL_SOURCE_ITEM_LIMIT = 6;
+const PAGE_STEP = 18;
 const PREFETCH_RESULT_COUNT = 6;
 
-const contentFilterItems: Array<{ label: string; value: ContentFilter }> = [
-  { label: '全部', value: 'all' },
-  { label: '电影', value: 'movie' },
-  { label: '剧集', value: 'tv' },
-  { label: '综艺', value: 'variety' },
-  { label: '动漫', value: 'anime' },
-];
-
-const sourceFilterItems: Array<{ label: string; value: SourceFilter }> = [
-  { label: '全部来源', value: 'all' },
-  { label: '多源优先', value: 'multi' },
-  { label: '单源补充', value: 'single' },
-];
+interface SourceGroup {
+  source: string;
+  sourceName: string;
+  items: SearchResult[];
+}
 
 function buildPlayUrl(item: SearchResult, searchTitle: string): string {
   return `/play?source=${encodeURIComponent(item.source || '')}&id=${encodeURIComponent(
@@ -69,6 +81,11 @@ function buildPreferredPlayUrl(
   group: SearchAggregateGroup,
   searchTitle: string
 ): string {
+  const bestItem = group.items[0];
+  if (bestItem?.source && bestItem?.id) {
+    return buildPlayUrl(bestItem, searchTitle);
+  }
+
   return `/play?title=${encodeURIComponent(group.title)}&year=${encodeURIComponent(
     group.year || ''
   )}&stype=${encodeURIComponent(group.type)}&stitle=${encodeURIComponent(
@@ -76,234 +93,208 @@ function buildPreferredPlayUrl(
   )}&prefer=1`;
 }
 
-function matchSourceFilter(sourceCount: number, sourceFilter: SourceFilter): boolean {
-  if (sourceFilter === 'multi') return sourceCount >= 2;
-  if (sourceFilter === 'single') return sourceCount < 2;
-  return true;
+function buildAggregateLaunchUrl(
+  group: SearchAggregateGroup,
+  searchTitle: string,
+  preferredItem?: SearchResult
+): string {
+  if (preferredItem?.source && preferredItem?.id) {
+    return buildPlayUrl(preferredItem, searchTitle);
+  }
+  return buildPreferredPlayUrl(group, searchTitle);
+}
+
+function buildSourceGroups(results: SearchResult[]): SourceGroup[] {
+  const grouped = new Map<string, SourceGroup>();
+
+  results.forEach((item) => {
+    const source = item.source || 'unknown';
+    const existing = grouped.get(source);
+    if (existing) {
+      existing.items.push(item);
+      return;
+    }
+
+    grouped.set(source, {
+      source,
+      sourceName: item.sourceName || source,
+      items: [item],
+    });
+  });
+
+  return Array.from(grouped.values()).sort((left, right) => {
+    if (left.items.length !== right.items.length) {
+      return right.items.length - left.items.length;
+    }
+    return left.sourceName.localeCompare(right.sourceName, 'zh-CN');
+  });
+}
+
+function formatExecutionSummary(execution?: SearchExecutionInfo): string {
+  if (!execution) return '服务端聚合搜索已完成。';
+  const parts = [
+    `${execution.completed_sources || 0}/${execution.total_sources || 0} 个源已响应`,
+  ];
+  if (typeof execution.elapsed_ms === 'number') {
+    parts.push(`${execution.elapsed_ms}ms`);
+  }
+  if (execution.degraded) {
+    parts.push('快速降级返回');
+  }
+  return parts.join(' · ');
 }
 
 export default function SearchResultsPanel({
   query,
   loading,
   results,
+  aggregates,
+  facets,
+  execution,
+  pageInfo,
   searchError,
-  sourceStatus,
+  sourceStatusItems,
   sourceTests,
   viewMode,
+  selectedTypes,
+  selectedSources,
+  selectedSort,
+  selectedSourceMode,
+  selectedYearFrom,
+  selectedYearTo,
   onViewModeChange,
+  onSortChange,
+  onToggleType,
+  onToggleSource,
+  onSourceModeChange,
+  onYearRangeApply,
+  onResetFilters,
+  onLoadMore,
 }: SearchResultsPanelProps) {
   const { navigate, prefetchHref } = useFastNavigation();
-  const [contentFilter, setContentFilter] = useState<ContentFilter>('all');
-  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
-  const [hiddenAggregateKeys, setHiddenAggregateKeys] = useState<string[]>([]);
-  const [aggregateLimit, setAggregateLimit] = useState(INITIAL_AGG_PAGE_SIZE);
-  const [allLimit, setAllLimit] = useState(INITIAL_ALL_PAGE_SIZE);
+  const [aggregateLimit, setAggregateLimit] = useState(INITIAL_AGGREGATE_LIMIT);
+  const [sourceLimit, setSourceLimit] = useState(INITIAL_SOURCE_LIMIT);
+  const [sourceItemLimits, setSourceItemLimits] = useState<Record<string, number>>(
+    {}
+  );
 
   useEffect(() => {
-    setHiddenAggregateKeys([]);
-    setAggregateLimit(INITIAL_AGG_PAGE_SIZE);
-    setAllLimit(INITIAL_ALL_PAGE_SIZE);
-    setContentFilter('all');
-    setSourceFilter('all');
-  }, [query]);
+    setAggregateLimit(INITIAL_AGGREGATE_LIMIT);
+    setSourceLimit(INITIAL_SOURCE_LIMIT);
+    setSourceItemLimits({});
+  }, [query, selectedSort, selectedTypes, selectedSources, selectedSourceMode, selectedYearFrom, selectedYearTo]);
 
-  const aggregatedResults = useMemo(
-    () => aggregateSearchResults(results),
-    [results]
-  );
-
-  const groupSourceCountMap = useMemo(() => {
-    const map = new Map<string, number>();
-    aggregatedResults.forEach((group) => {
-      map.set(group.key, group.sourceCount);
-    });
-    return map;
-  }, [aggregatedResults]);
-
-  const sortedResults = useMemo(() => sortSearchResults(results), [results]);
-
-  const filteredAggregatedResults = useMemo(
-    () =>
-      aggregatedResults.filter((group) => {
-        const contentMatches =
-          contentFilter === 'all' || group.type === contentFilter;
-        return contentMatches && matchSourceFilter(group.sourceCount, sourceFilter);
-      }),
-    [aggregatedResults, contentFilter, sourceFilter]
-  );
-
-  const visibleAggregatedResults = useMemo(
-    () =>
-      filteredAggregatedResults.filter(
-        (group) => !!group.cover && !hiddenAggregateKeys.includes(group.key)
-      ),
-    [filteredAggregatedResults, hiddenAggregateKeys]
-  );
-
-  const filteredAllResults = useMemo(
-    () =>
-      sortedResults.filter((item) => {
-        const contentMatches =
-          contentFilter === 'all' || item.type === contentFilter;
-        const sourceCount = groupSourceCountMap.get(buildAggregateKey(item));
-        return (
-          contentMatches &&
-          matchSourceFilter(sourceCount || 0, sourceFilter)
-        );
-      }),
-    [contentFilter, groupSourceCountMap, sortedResults, sourceFilter]
-  );
-
-  const displayedAggregatedResults = visibleAggregatedResults.slice(0, aggregateLimit);
-  const displayedAllResults = filteredAllResults.slice(0, allLimit);
-  const totalSources = Object.keys(sourceStatus).length;
-  const failedSources = Object.values(sourceStatus).filter(
-    (value) => value === 'error'
-  ).length;
-  const showBlockingLoading = loading && results.length === 0;
+  const sourceGroups = useMemo(() => buildSourceGroups(results), [results]);
+  const displayedAggregates = aggregates.slice(0, aggregateLimit);
+  const displayedSourceGroups = sourceGroups.slice(0, sourceLimit);
+  const visibleTotal =
+    viewMode === 'aggregate'
+      ? aggregates.length
+      : viewMode === 'sources'
+      ? sourceGroups.length
+      : pageInfo?.total || results.length;
+  const hasMoreLines =
+    Number(pageInfo?.total || 0) > results.length &&
+    Number(pageInfo?.page_size || 0) > 0;
 
   useEffect(() => {
-    if (viewMode === 'agg') {
-      displayedAggregatedResults.slice(0, PREFETCH_RESULT_COUNT).forEach((group) => {
-        prefetchHref(buildPreferredPlayUrl(group, query));
-      });
-      return;
-    }
-
-    displayedAllResults.slice(0, PREFETCH_RESULT_COUNT).forEach((item) => {
-      prefetchHref(buildPlayUrl(item, query));
-    });
-  }, [displayedAggregatedResults, displayedAllResults, prefetchHref, query, viewMode]);
+    const targets =
+      viewMode === 'aggregate'
+        ? displayedAggregates.slice(0, PREFETCH_RESULT_COUNT).map((item) =>
+            buildPreferredPlayUrl(item, query)
+          )
+        : results.slice(0, PREFETCH_RESULT_COUNT).map((item) =>
+            buildPlayUrl(item, query)
+          );
+    targets.forEach((href) => prefetchHref(href));
+  }, [displayedAggregates, prefetchHref, query, results, viewMode]);
 
   if (!query) return null;
 
   return (
-    <>
-      <div className='mb-6 flex flex-wrap items-start justify-between gap-4'>
-        <div>
-          <h1 className='text-xl font-bold text-white'>
-            "{query}" 的搜索结果
-            {!loading && results.length > 0 && (
-              <span className='ml-2 text-base font-normal text-netflix-gray-500'>
-                ({viewMode === 'agg' ? visibleAggregatedResults.length : filteredAllResults.length})
-              </span>
-            )}
-          </h1>
-          <p className='mt-2 text-sm text-netflix-gray-500'>
-            先看聚合结果，再按线路展开，能明显减少误点和等待。
-          </p>
-        </div>
-
-        <div className='flex flex-wrap items-center gap-2'>
-          {results.length > 0 && (
-            <div className='rounded-full border border-netflix-gray-700 p-1'>
-              <button
-                onClick={() => onViewModeChange('agg')}
-                className={`rounded-full px-3 py-1 text-xs ${
-                  viewMode === 'agg'
-                    ? 'bg-netflix-red text-white'
-                    : 'text-netflix-gray-300'
-                }`}
-              >
-                聚合
-              </button>
-              <button
-                onClick={() => onViewModeChange('all')}
-                className={`rounded-full px-3 py-1 text-xs ${
-                  viewMode === 'all'
-                    ? 'bg-netflix-red text-white'
-                    : 'text-netflix-gray-300'
-                }`}
-              >
-                全部
-              </button>
-            </div>
-          )}
-
-          {totalSources > 0 && (
-            <span className='text-xs text-netflix-gray-400'>
-              已返回 {totalSources} 个资源站
-              {failedSources > 0 ? `（失败 ${failedSources}）` : ''}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {results.length > 0 && (
-        <div className='mb-6 rounded-2xl border border-netflix-gray-800 bg-netflix-surface/60 p-4'>
-          <div className='mb-3 flex items-center gap-2 text-sm text-netflix-gray-400'>
-            <Filter className='h-4 w-4' />
-            结果筛选
+    <div className='space-y-6'>
+      <section className='rounded-[32px] border border-netflix-gray-800 bg-[radial-gradient(circle_at_top_left,rgba(229,9,20,0.22),transparent_38%),linear-gradient(180deg,rgba(18,18,18,0.95),rgba(9,9,9,0.96))] p-5 md:p-7'>
+        <div className='flex flex-wrap items-start justify-between gap-5'>
+          <div className='space-y-2'>
+            <p className='text-xs uppercase tracking-[0.35em] text-netflix-gray-500'>
+              Search Workbench
+            </p>
+            <h1 className='text-2xl font-black text-white md:text-3xl'>
+              {query}
+            </h1>
+            <p className='text-sm text-netflix-gray-400'>
+              {formatExecutionSummary(execution)}
+            </p>
           </div>
 
-          <div className='flex flex-wrap gap-2'>
-            {contentFilterItems.map((item) => (
-              <button
-                key={item.value}
-                onClick={() => setContentFilter(item.value)}
-                className={`rounded-full px-3 py-1.5 text-xs transition-colors ${
-                  contentFilter === item.value
-                    ? 'bg-white text-black'
-                    : 'border border-netflix-gray-700 text-netflix-gray-300 hover:border-netflix-gray-500 hover:text-white'
-                }`}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-
-          <div className='mt-3 flex flex-wrap gap-2'>
-            {sourceFilterItems.map((item) => (
-              <button
-                key={item.value}
-                onClick={() => setSourceFilter(item.value)}
-                className={`rounded-full px-3 py-1.5 text-xs transition-colors ${
-                  sourceFilter === item.value
-                    ? 'bg-netflix-red text-white'
-                    : 'border border-netflix-gray-700 text-netflix-gray-300 hover:border-netflix-gray-500 hover:text-white'
-                }`}
-              >
-                {item.label}
-              </button>
-            ))}
+          <div className='rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-right'>
+            <p className='text-xs uppercase tracking-[0.3em] text-netflix-gray-500'>
+              当前命中
+            </p>
+            <p className='mt-1 text-3xl font-black text-white'>{visibleTotal}</p>
+            <p className='mt-1 text-xs text-netflix-gray-400'>
+              {viewMode === 'aggregate'
+                ? '聚合结果'
+                : viewMode === 'sources'
+                ? '资源站分组'
+                : '线路结果'}
+            </p>
           </div>
         </div>
-      )}
+      </section>
+
+      <SearchFilterPanel
+        facets={facets}
+        execution={execution}
+        selectedView={viewMode}
+        selectedSort={selectedSort}
+        selectedTypes={selectedTypes}
+        selectedSources={selectedSources}
+        selectedSourceMode={selectedSourceMode}
+        selectedYearFrom={selectedYearFrom}
+        selectedYearTo={selectedYearTo}
+        onViewChange={onViewModeChange}
+        onSortChange={onSortChange}
+        onToggleType={onToggleType}
+        onToggleSource={onToggleSource}
+        onSourceModeChange={onSourceModeChange}
+        onYearRangeApply={onYearRangeApply}
+        onResetFilters={onResetFilters}
+      />
+
+      <SearchSourceStatusPanel
+        execution={execution}
+        statuses={sourceStatusItems}
+      />
 
       {searchError && (
-        <div className='mb-6 rounded-lg border border-yellow-500/20 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-300'>
+        <div className='rounded-2xl border border-yellow-500/20 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-200'>
           {searchError}
         </div>
       )}
 
       {loading && results.length > 0 && (
-        <div className='mb-4 rounded-lg border border-netflix-gray-800 bg-netflix-surface/40 px-4 py-3 text-sm text-netflix-gray-400'>
-          正在继续聚合其它资源站，当前结果已可先行浏览。
+        <div className='rounded-2xl border border-netflix-gray-800 bg-netflix-surface/60 px-4 py-3 text-sm text-netflix-gray-400'>
+          正在更新筛选结果，当前内容可先浏览。
         </div>
       )}
 
-      {showBlockingLoading ? (
-        <div className='flex items-center justify-center py-20'>
-          <Loader2 className='h-12 w-12 animate-spin text-netflix-red' />
+      {loading && results.length === 0 ? (
+        <div className='flex items-center justify-center py-16'>
+          <Loader2 className='h-10 w-10 animate-spin text-netflix-red' />
         </div>
-      ) : results.length === 0 ? (
-        <div className='py-20 text-center'>
-          <p className='text-lg text-netflix-gray-500'>未找到相关结果</p>
-          <p className='mt-2 text-sm text-netflix-gray-600'>尝试更换关键词搜索</p>
+      ) : visibleTotal === 0 ? (
+        <div className='rounded-3xl border border-netflix-gray-800 bg-netflix-surface/50 py-16 text-center'>
+          <p className='text-lg text-netflix-gray-300'>没有找到匹配结果</p>
+          <p className='mt-2 text-sm text-netflix-gray-500'>
+            可以尝试更换关键词、放宽年份范围，或者切换来源模式。
+          </p>
         </div>
-      ) : viewMode === 'agg' ? (
+      ) : viewMode === 'aggregate' ? (
         <>
-          <div className='grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 sm:gap-6'>
-            {displayedAggregatedResults.map((group, index) => {
-              const first = group.items[0];
-              const sourceNames = Array.from(
-                new Set(
-                  group.items
-                    .map((item) => item.sourceName || item.source || '')
-                    .filter(Boolean)
-                )
-              );
-              const bestTested = group.items
+          <div className='grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-6'>
+            {displayedAggregates.map((group, index) => {
+              const testedItems = group.items
                 .map((item) => {
                   const key = `${item.source || ''}+${item.id || ''}`;
                   const test = sourceTests[key];
@@ -319,89 +310,87 @@ export default function SearchResultsPanel({
                   };
                 })
                 .filter(Boolean)
-                .sort((a, b) => (b?.score || 0) - (a?.score || 0))[0];
-              const launchItem = bestTested?.item || first;
+                .sort((left, right) => (right?.score || 0) - (left?.score || 0));
+              const bestCandidate = testedItems[0]?.item || group.items[0];
 
               return (
-                <motion.div
+                <motion.article
                   key={group.key}
-                  initial={{ opacity: 0, y: 20 }}
+                  initial={{ opacity: 0, y: 16 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: Math.min(index * 0.03, 0.4) }}
-                  className='rounded-lg border border-netflix-gray-800 bg-netflix-surface/70 p-2'
+                  transition={{ delay: Math.min(index * 0.03, 0.35) }}
+                  className='rounded-3xl border border-netflix-gray-800 bg-netflix-surface/60 p-3'
                 >
-                  <div className='relative overflow-hidden rounded'>
+                  <div className='relative overflow-hidden rounded-2xl'>
                     <SmartImage
                       src={toProxyImageSrc(group.cover)}
                       alt={group.title}
                       fill
                       sizes='(max-width: 768px) 50vw, 16vw'
                       className='aspect-[2/3] w-full object-cover'
-                      onError={() => {
-                        setHiddenAggregateKeys((prev) =>
-                          prev.includes(group.key) ? prev : [...prev, group.key]
-                        );
-                      }}
                     />
                     <button
-                      onClick={() => navigate(buildPreferredPlayUrl(group, query))}
-                      onPointerEnter={() =>
-                        prefetchHref(buildPreferredPlayUrl(group, query))
+                      type='button'
+                      onClick={() =>
+                        navigate(buildAggregateLaunchUrl(group, query, bestCandidate))
                       }
-                      className='absolute right-2 top-2 inline-flex items-center gap-1 rounded bg-netflix-red px-2 py-1 text-[11px] text-white'
+                      className='absolute right-2 top-2 inline-flex items-center gap-1 rounded-full bg-netflix-red px-2.5 py-1 text-[11px] text-white shadow-lg'
                     >
                       <Zap className='h-3 w-3' />
                       优选
                     </button>
                   </div>
 
-                  <p className='mt-2 truncate text-sm font-semibold text-white'>
-                    {group.title}
-                  </p>
-                  <p className='mt-1 text-[11px] text-netflix-gray-400'>
-                    共 {group.items.length} 条线路 · {group.sourceCount} 个源
-                  </p>
-                  <p className='mt-1 text-[11px] text-netflix-gray-500'>
-                    {bestTested
-                      ? `优选参考: ${bestTested.test.quality || '未知'} · ${
-                          typeof bestTested.test.pingMs === 'number'
-                            ? `${bestTested.test.pingMs}ms`
-                            : '--'
-                        }`
-                      : '优选参考: 待测速'}
-                  </p>
-                  <div className='mt-2 flex flex-wrap gap-1'>
-                    {sourceNames.slice(0, 3).map((name) => (
-                      <span
-                        key={name}
-                        className='rounded bg-netflix-gray-800 px-2 py-0.5 text-[10px] text-netflix-gray-300'
-                      >
-                        {name}
-                      </span>
-                    ))}
-                  </div>
+                  <div className='mt-3 space-y-2'>
+                    <p className='line-clamp-2 text-sm font-semibold text-white'>
+                      {group.title}
+                    </p>
+                    <p className='text-[11px] text-netflix-gray-400'>
+                      {group.year || '年份未知'} · {group.sourceCount} 个源 ·{' '}
+                      {group.resultCount} 条线路
+                    </p>
 
-                  {launchItem?.source && launchItem?.id ? (
+                    {group.tags && group.tags.length > 0 && (
+                      <div className='flex flex-wrap gap-1'>
+                        {group.tags.slice(0, 3).map((tag) => (
+                          <span
+                            key={tag}
+                            className='rounded-full border border-netflix-gray-700 px-2 py-0.5 text-[10px] text-netflix-gray-300'
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {bestCandidate?.matchReasons && bestCandidate.matchReasons.length > 0 && (
+                      <p className='text-[11px] text-netflix-gray-500'>
+                        <Sparkles className='mr-1 inline h-3 w-3' />
+                        {bestCandidate.matchReasons.slice(0, 2).join(' · ')}
+                      </p>
+                    )}
+
                     <button
-                      onClick={() => navigate(buildPlayUrl(launchItem, query))}
-                      onPointerEnter={() =>
-                        prefetchHref(buildPlayUrl(launchItem, query))
+                      type='button'
+                      onClick={() =>
+                        navigate(buildAggregateLaunchUrl(group, query, bestCandidate))
                       }
-                      className='mt-2 inline-flex items-center gap-1 rounded bg-black/70 px-2 py-1 text-[11px] text-white hover:bg-netflix-red'
+                      className='inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5 text-xs text-white transition-colors hover:bg-netflix-red'
                     >
-                      <Power className='h-3 w-3' />
-                      查看线路
+                      <Power className='h-3.5 w-3.5' />
+                      立即查看
                     </button>
-                  ) : null}
-                </motion.div>
+                  </div>
+                </motion.article>
               );
             })}
           </div>
 
-          {visibleAggregatedResults.length > aggregateLimit && (
-            <div className='mt-8 flex justify-center'>
+          {aggregates.length > aggregateLimit && (
+            <div className='flex justify-center'>
               <button
-                onClick={() => setAggregateLimit((prev) => prev + PAGE_SIZE_STEP)}
+                type='button'
+                onClick={() => setAggregateLimit((value) => value + PAGE_STEP)}
                 className='rounded-full border border-netflix-gray-700 px-5 py-2 text-sm text-netflix-gray-300 transition-colors hover:border-netflix-gray-500 hover:text-white'
               >
                 加载更多聚合结果
@@ -409,21 +398,109 @@ export default function SearchResultsPanel({
             </div>
           )}
         </>
+      ) : viewMode === 'sources' ? (
+        <>
+          <div className='space-y-4'>
+            {displayedSourceGroups.map((group) => (
+              (() => {
+                const visibleItems =
+                  sourceItemLimits[group.source] || INITIAL_SOURCE_ITEM_LIMIT;
+                return (
+                  <section
+                    key={group.source}
+                    className='rounded-3xl border border-netflix-gray-800 bg-netflix-surface/50 p-4'
+                  >
+                    <div className='mb-4 flex items-center justify-between gap-3'>
+                      <div>
+                        <p className='text-lg font-semibold text-white'>
+                          {group.sourceName}
+                        </p>
+                        <p className='text-sm text-netflix-gray-500'>
+                          当前已加载 {group.items.length} 条线路
+                        </p>
+                      </div>
+                      <span className='rounded-full border border-netflix-gray-700 px-3 py-1 text-xs text-netflix-gray-300'>
+                        {group.source}
+                      </span>
+                    </div>
+
+                    <div className='grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-6'>
+                      {group.items.slice(0, visibleItems).map((item) => (
+                        <div key={`${item.source}-${item.id}`}>
+                          <ContentCard
+                            id={item.id}
+                            title={item.title}
+                            cover={item.cover}
+                            firstEpisode={item.episodes[0]}
+                            rating={item.rating}
+                            year={item.year}
+                            type={item.type}
+                            source={item.source}
+                            sourceName={item.sourceName}
+                            searchTitle={query || item.title}
+                          />
+                        </div>
+                      ))}
+                    </div>
+
+                    {group.items.length > visibleItems && (
+                      <div className='mt-4 flex justify-center'>
+                        <button
+                          type='button'
+                          onClick={() =>
+                            setSourceItemLimits((previous) => ({
+                              ...previous,
+                              [group.source]: visibleItems + INITIAL_SOURCE_ITEM_LIMIT,
+                            }))
+                          }
+                          className='rounded-full border border-netflix-gray-700 px-4 py-2 text-xs text-netflix-gray-300 transition-colors hover:border-netflix-gray-500 hover:text-white'
+                        >
+                          展开该源更多线路
+                        </button>
+                      </div>
+                    )}
+                  </section>
+                );
+              })()
+            ))}
+          </div>
+
+          {sourceGroups.length > sourceLimit && (
+            <div className='flex justify-center'>
+              <button
+                type='button'
+                onClick={() => setSourceLimit((value) => value + 6)}
+                className='rounded-full border border-netflix-gray-700 px-5 py-2 text-sm text-netflix-gray-300 transition-colors hover:border-netflix-gray-500 hover:text-white'
+              >
+                展开更多资源站
+              </button>
+            </div>
+          )}
+
+          {hasMoreLines && (
+            <div className='flex justify-center'>
+              <button
+                type='button'
+                onClick={onLoadMore}
+                className='rounded-full border border-netflix-gray-700 px-5 py-2 text-sm text-netflix-gray-300 transition-colors hover:border-netflix-gray-500 hover:text-white'
+              >
+                继续加载更多资源站结果
+              </button>
+            </div>
+          )}
+        </>
       ) : (
         <>
-          <div className='grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 sm:gap-6'>
-            {displayedAllResults.map((item, index) => {
-              const key = `${item.source || 'unknown'}+${item.id}`;
-              const test = sourceTests[key];
-
-              return (
-                <motion.div
-                  key={`${item.source || 'unknown'}-${item.id}-${index}`}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: Math.min(index * 0.03, 0.4) }}
-                  className='relative'
-                >
+          <div className='grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-6'>
+            {results.map((item, index) => (
+              <motion.div
+                key={`${item.source || 'unknown'}-${item.id}-${index}`}
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: Math.min(index * 0.02, 0.3) }}
+                className='space-y-2'
+              >
+                <div className='relative'>
                   <ContentCard
                     id={item.id}
                     title={item.title}
@@ -437,37 +514,35 @@ export default function SearchResultsPanel({
                     sourceName={item.sourceName}
                   />
                   <button
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      navigate(buildPlayUrl(item, query));
-                    }}
-                    onPointerEnter={() => prefetchHref(buildPlayUrl(item, query))}
-                    className='absolute right-2 top-2 z-20 inline-flex items-center gap-1 rounded bg-black/70 px-2 py-1 text-[11px] text-white hover:bg-netflix-red'
-                    title='线路选择与测速'
+                    type='button'
+                    onClick={() => navigate(buildPlayUrl(item, query))}
+                    className='absolute right-2 top-2 z-20 inline-flex items-center gap-1 rounded-full bg-black/70 px-2.5 py-1 text-[11px] text-white transition-colors hover:bg-netflix-red'
                   >
-                    <Power className='h-3 w-3' />
-                    线路
+                    <ChevronRight className='h-3 w-3' />
+                    播放
                   </button>
+                </div>
 
-                  <div className='mt-1 space-y-1'>
-                    <p className='truncate text-[11px] text-netflix-gray-400'>
-                      {item.sourceName || item.source || '未知来源'}
+                <div className='rounded-2xl border border-netflix-gray-800 bg-black/20 px-3 py-2'>
+                  <p className='text-[11px] text-netflix-gray-400'>
+                    {item.sourceName || item.source || '未知来源'} · 分数{' '}
+                    {Math.round(item.matchScore || 0)}
+                  </p>
+                  {item.matchReasons && item.matchReasons.length > 0 && (
+                    <p className='mt-1 line-clamp-2 text-[11px] text-netflix-gray-500'>
+                      {item.matchReasons.join(' · ')}
                     </p>
-                    <p className='text-[11px] text-netflix-gray-500'>
-                      清晰度:{' '}
-                      {test?.quality || (test?.status === 'testing' ? '检测中' : '未知')} · 延迟:{' '}
-                      {typeof test?.pingMs === 'number' ? `${test.pingMs}ms` : '--'}
-                    </p>
-                  </div>
-                </motion.div>
-              );
-            })}
+                  )}
+                </div>
+              </motion.div>
+            ))}
           </div>
 
-          {filteredAllResults.length > allLimit && (
-            <div className='mt-8 flex justify-center'>
+          {hasMoreLines && (
+            <div className='flex justify-center'>
               <button
-                onClick={() => setAllLimit((prev) => prev + PAGE_SIZE_STEP)}
+                type='button'
+                onClick={onLoadMore}
                 className='rounded-full border border-netflix-gray-700 px-5 py-2 text-sm text-netflix-gray-300 transition-colors hover:border-netflix-gray-500 hover:text-white'
               >
                 加载更多线路结果
@@ -476,6 +551,12 @@ export default function SearchResultsPanel({
           )}
         </>
       )}
-    </>
+
+      {viewMode === 'lines' && (
+        <div className='rounded-2xl border border-netflix-gray-800 bg-netflix-surface/40 px-4 py-3 text-xs text-netflix-gray-500'>
+          当前线路结果按服务端智能分排序，综合考虑标题命中、年份、类型和可播放性。
+        </div>
+      )}
+    </div>
   );
 }

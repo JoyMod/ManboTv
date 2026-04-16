@@ -17,22 +17,41 @@ import (
 
 // SearchLegacy handles GET /api/search.
 func (h *SearchHandler) SearchLegacy(c *gin.Context) {
-	query := strings.TrimSpace(c.Query("q"))
-	if query == "" {
-		c.JSON(http.StatusOK, gin.H{"results": []interface{}{}})
+	req := parseSearchRequest(c)
+	if strings.TrimSpace(req.Query) == "" {
+		c.JSON(http.StatusOK, gin.H{
+			"results":             []interface{}{},
+			"aggregates":          []interface{}{},
+			"source_status":       map[string]string{},
+			"source_status_items": []interface{}{},
+		})
 		return
 	}
 
 	sites := h.resolveSites(c)
-	results, err := h.service.Search(c.Request.Context(), query, sites)
+	envelope, err := h.service.SearchAdvanced(
+		c.Request.Context(),
+		buildLegacySearchParams(c.Request.Context(), req, h.adminStorage),
+		sites,
+		resolveContentPolicyFromRequest(c, h.adminStorage),
+	)
 	if err != nil {
-		h.logger.Error("legacy search failed", zap.Error(err), zap.String("query", query))
+		h.logger.Error("legacy search failed", zap.Error(err), zap.String("query", req.Query))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "搜索失败", "results": []interface{}{}})
 		return
 	}
-	results = filterResults(results, resolveContentPolicyFromRequest(c, h.adminStorage))
 
-	c.JSON(http.StatusOK, gin.H{"results": results})
+	c.JSON(http.StatusOK, gin.H{
+		"query":               envelope.Query,
+		"normalized_query":    envelope.NormalizedQuery,
+		"results":             envelope.Results,
+		"aggregates":          envelope.Aggregates,
+		"facets":              envelope.Facets,
+		"source_status":       envelope.LegacySourceMap,
+		"source_status_items": envelope.SourceStatus,
+		"page_info":           envelope.PageInfo,
+		"execution":           envelope.Execution,
+	})
 }
 
 // SearchSingleLegacy handles GET /api/search/one.

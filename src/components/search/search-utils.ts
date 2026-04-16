@@ -6,6 +6,7 @@ export interface SearchResult {
   cover: string;
   year: string;
   rating?: string;
+  remarks?: string;
   type: 'movie' | 'tv' | 'variety' | 'anime';
   source?: string;
   sourceName?: string;
@@ -13,6 +14,8 @@ export interface SearchResult {
   episodesTitles: string[];
   tags?: string[];
   isAdult?: boolean;
+  matchScore?: number;
+  matchReasons?: string[];
 }
 
 export interface RawSearchItem {
@@ -22,6 +25,7 @@ export interface RawSearchItem {
   cover?: string;
   year?: string;
   rate?: string;
+  remarks?: string;
   source?: string;
   source_name?: string;
   class?: string;
@@ -30,6 +34,8 @@ export interface RawSearchItem {
   episodes_titles?: string[];
   tags?: string[];
   is_adult?: boolean;
+  match_score?: number;
+  match_reasons?: string[];
 }
 
 export interface SourceTestResult {
@@ -49,10 +55,23 @@ export interface StreamMessage {
 
 export interface SearchBootstrapPayload {
   query?: string;
+  normalized_query?: string;
   results?: RawSearchItem[];
+  aggregates?: RawSearchAggregateGroup[];
+  facets?: SearchFacets;
   history?: string[];
   suggestions?: string[];
   source_status?: Record<string, 'done' | 'error'>;
+  source_status_items?: SearchSourceStatusItem[];
+  page_info?: SearchPageInfo;
+  execution?: SearchExecutionInfo;
+  selected_types?: string[];
+  selected_sources?: string[];
+  selected_sort?: string;
+  selected_view?: string;
+  selected_year_from?: number;
+  selected_year_to?: number;
+  selected_source_mode?: string;
 }
 
 export interface SuggestionItem {
@@ -67,7 +86,65 @@ export interface SearchAggregateGroup {
   cover: string;
   rating?: string;
   sourceCount: number;
+  resultCount: number;
+  bestSource?: string;
+  bestSourceName?: string;
+  tags?: string[];
   items: SearchResult[];
+}
+
+export interface RawSearchAggregateGroup {
+  key?: string;
+  title?: string;
+  year?: string;
+  type?: SearchResult['type'];
+  cover?: string;
+  rating?: string;
+  source_count?: number;
+  result_count?: number;
+  best_source?: string;
+  best_source_name?: string;
+  tags?: string[];
+  items?: RawSearchItem[];
+}
+
+export interface SearchFacetBucket {
+  value: string;
+  label: string;
+  count: number;
+}
+
+export interface SearchFacets {
+  types?: SearchFacetBucket[];
+  sources?: SearchFacetBucket[];
+  years?: SearchFacetBucket[];
+}
+
+export interface SearchSourceStatusItem {
+  source: string;
+  source_name?: string;
+  status: 'done' | 'empty' | 'partial' | 'timeout' | 'error';
+  result_count?: number;
+  page_count?: number;
+  elapsed_ms?: number;
+  error?: string;
+}
+
+export interface SearchPageInfo {
+  page?: number;
+  page_size?: number;
+  total?: number;
+  total_pages?: number;
+}
+
+export interface SearchExecutionInfo {
+  query?: string;
+  normalized_query?: string;
+  completed_sources?: number;
+  total_sources?: number;
+  elapsed_ms?: number;
+  degraded?: boolean;
+  streaming_enabled?: boolean;
 }
 
 export const HOT_SEARCHES = [
@@ -167,7 +244,8 @@ export function normalizeItems(
       title: item.title || '未知标题',
       cover: normalizedCover,
       year: item.year || '',
-      rating: item.rate || '',
+      rating: item.rate || item.remarks || '',
+      remarks: item.remarks || '',
       type: mapContentType(item),
       source: item.source,
       sourceName: item.source_name || '',
@@ -177,10 +255,56 @@ export function normalizeItems(
         : [],
       tags: Array.isArray(item.tags) ? item.tags : [],
       isAdult: Boolean(item.is_adult),
+      matchScore: Number.isFinite(item.match_score) ? item.match_score : 0,
+      matchReasons: Array.isArray(item.match_reasons)
+        ? item.match_reasons.filter((reason) => typeof reason === 'string')
+        : [],
     });
   });
 
   return list;
+}
+
+export function normalizeAggregateGroups(
+  rawGroups: RawSearchAggregateGroup[],
+  normalizeImageUrl: (url?: string | null) => string
+): SearchAggregateGroup[] {
+  return rawGroups
+    .map((group) => ({
+      key: group.key || '',
+      title: group.title || '未知标题',
+      year: group.year || '',
+      type: (group.type || 'movie') as SearchResult['type'],
+      cover: normalizeImageUrl(group.cover || ''),
+      rating: group.rating || '',
+      sourceCount: Number(group.source_count || 0),
+      resultCount: Number(group.result_count || 0),
+      bestSource: group.best_source || '',
+      bestSourceName: group.best_source_name || '',
+      tags: Array.isArray(group.tags) ? group.tags : [],
+      items: normalizeItems(
+        Array.isArray(group.items) ? group.items : [],
+        normalizeImageUrl
+      ),
+    }))
+    .filter((group) => Boolean(group.key) && Boolean(group.cover));
+}
+
+export function normalizeSearchSourceStatuses(
+  items: SearchSourceStatusItem[] | undefined
+): SearchSourceStatusItem[] {
+  if (!Array.isArray(items)) return [];
+  return items
+    .filter((item) => item && typeof item.source === 'string')
+    .map((item) => ({
+      source: item.source,
+      source_name: item.source_name || item.source,
+      status: item.status || 'error',
+      result_count: Number(item.result_count || 0),
+      page_count: Number(item.page_count || 0),
+      elapsed_ms: Number(item.elapsed_ms || 0),
+      error: item.error || '',
+    }));
 }
 
 export function aggregateSearchResults(
@@ -204,6 +328,7 @@ export function aggregateSearchResults(
       cover: item.cover,
       rating: item.rating,
       sourceCount: 0,
+      resultCount: 0,
       items: [item],
     });
   });
@@ -214,6 +339,7 @@ export function aggregateSearchResults(
       sourceCount: new Set(
         group.items.map((item) => item.source).filter(Boolean)
       ).size,
+      resultCount: group.items.length,
     }))
     .sort((a, b) => {
       if (b.sourceCount !== a.sourceCount) return b.sourceCount - a.sourceCount;

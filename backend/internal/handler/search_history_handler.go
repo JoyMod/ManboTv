@@ -28,7 +28,7 @@ func NewSearchHistoryHandler(storage model.StorageService, logger *zap.Logger) *
 // GetHistory 获取搜索历史
 // GET /api/v1/searchhistory
 func (h *SearchHistoryHandler) GetHistory(c *gin.Context) {
-	username := c.GetString("username")
+	username := resolveUsernameFromContext(c)
 	if username == "" {
 		c.JSON(http.StatusOK, model.Error(model.CodeUnauthorized, "未登录"))
 		return
@@ -50,7 +50,7 @@ func (h *SearchHistoryHandler) GetHistory(c *gin.Context) {
 // AddHistory 添加搜索历史
 // POST /api/v1/searchhistory
 func (h *SearchHistoryHandler) AddHistory(c *gin.Context) {
-	username := c.GetString("username")
+	username := resolveUsernameFromContext(c)
 	if username == "" {
 		c.JSON(http.StatusOK, model.Error(model.CodeUnauthorized, "未登录"))
 		return
@@ -93,7 +93,7 @@ func (h *SearchHistoryHandler) AddHistory(c *gin.Context) {
 // DeleteHistory 删除搜索历史
 // DELETE /api/v1/searchhistory?keyword=xxx
 func (h *SearchHistoryHandler) DeleteHistory(c *gin.Context) {
-	username := c.GetString("username")
+	username := resolveUsernameFromContext(c)
 	if username == "" {
 		c.JSON(http.StatusOK, model.Error(model.CodeUnauthorized, "未登录"))
 		return

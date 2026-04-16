@@ -26,6 +26,10 @@ type SiteConfig = {
   SiteName: string;
   Announcement: string;
   SearchDownstreamMaxPage: number;
+  SearchSourceTimeoutMs: number;
+  SearchMaxConcurrent: number;
+  SearchDefaultSort: string;
+  SearchEnableStream: boolean;
   SiteInterfaceCacheTime: number;
   DoubanProxyType: string;
   DoubanProxy: string;
@@ -87,6 +91,10 @@ const defaultSiteConfig: SiteConfig = {
   SiteName: '曼波TV',
   Announcement: '',
   SearchDownstreamMaxPage: 3,
+  SearchSourceTimeoutMs: 4500,
+  SearchMaxConcurrent: 8,
+  SearchDefaultSort: 'smart',
+  SearchEnableStream: true,
   SiteInterfaceCacheTime: 30,
   DoubanProxyType: '',
   DoubanProxy: '',

@@ -64,6 +64,10 @@ type SiteConfig struct {
 	SiteName                string   `json:"site_name"`
 	Announcement            string   `json:"announcement"`
 	SearchDownstreamMaxPage int      `json:"search_downstream_max_page"`
+	SearchSourceTimeoutMs   int      `json:"search_source_timeout_ms,omitempty"`
+	SearchMaxConcurrent     int      `json:"search_max_concurrent,omitempty"`
+	SearchDefaultSort       string   `json:"search_default_sort,omitempty"`
+	SearchEnableStream      bool     `json:"search_enable_stream,omitempty"`
 	SiteInterfaceCacheTime  int      `json:"site_interface_cache_time"`
 	DoubanProxyType         string   `json:"douban_proxy_type"`
 	DoubanProxy             string   `json:"douban_proxy"`

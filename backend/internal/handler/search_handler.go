@@ -3,6 +3,7 @@ package handler
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -39,9 +40,9 @@ func NewSearchHandler(
 
 // Search 搜索接口
 func (h *SearchHandler) Search(c *gin.Context) {
-	var req model.SearchRequest
-	if err := c.ShouldBindQuery(&req); err != nil {
-		h.logger.Warn("搜索参数无效", zap.Error(err))
+	req := parseSearchRequest(c)
+	if strings.TrimSpace(req.Query) == "" {
+		h.logger.Warn("搜索参数无效")
 		c.JSON(http.StatusOK, model.Error(model.CodeInvalidParams, "搜索关键词不能为空"))
 		return
 	}
@@ -55,24 +56,34 @@ func (h *SearchHandler) Search(c *gin.Context) {
 
 	// 执行搜索
 	sites := h.resolveSites(c)
-	results, err := h.service.Search(c.Request.Context(), req.Query, sites)
+	params := buildSearchParams(c.Request.Context(), req, h.adminStorage)
+	envelope, err := h.service.SearchAdvanced(
+		c.Request.Context(),
+		params,
+		sites,
+		resolveContentPolicyFromRequest(c, h.adminStorage),
+	)
 	if err != nil {
 		h.logger.Error("搜索失败", zap.Error(err))
 		c.JSON(http.StatusOK, model.Error(model.CodeInternalError, "搜索服务暂时不可用"))
 		return
 	}
-	results = filterResults(results, resolveContentPolicyFromRequest(c, h.adminStorage))
-
-	// 分页处理
-	paginatedResults := h.paginate(results, req.Page, req.PageSize)
 
 	h.logger.Info("搜索完成",
 		zap.String("query", req.Query),
-		zap.Int("total_results", len(results)),
-		zap.Int("returned_results", paginatedResults.PageInfo.PageSize),
+		zap.Int64("total_results", envelope.PageInfo.Total),
+		zap.Int("returned_results", len(envelope.Results)),
 	)
 
-	c.JSON(http.StatusOK, model.Success(paginatedResults))
+	c.JSON(
+		http.StatusOK,
+		model.Success(model.NewPaginatedResponse(
+			envelope.Results,
+			envelope.PageInfo.Page,
+			envelope.PageInfo.PageSize,
+			envelope.PageInfo.Total,
+		)),
+	)
 }
 
 // SearchSingle 单源搜索接口

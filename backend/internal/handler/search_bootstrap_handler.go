@@ -25,11 +25,24 @@ type SearchBootstrapHandler struct {
 }
 
 type searchBootstrapResponse struct {
-	Query        string               `json:"query"`
-	Results      []model.SearchResult `json:"results"`
-	History      []string             `json:"history"`
-	Suggestions  []string             `json:"suggestions"`
-	SourceStatus map[string]string    `json:"source_status"`
+	Query            string                        `json:"query"`
+	NormalizedQuery  string                        `json:"normalized_query"`
+	Results          []model.SearchResult          `json:"results"`
+	Aggregates       []model.SearchAggregateResult `json:"aggregates"`
+	Facets           model.SearchFacets            `json:"facets"`
+	History          []string                      `json:"history"`
+	Suggestions      []string                      `json:"suggestions"`
+	SourceStatus     map[string]string             `json:"source_status"`
+	SourceStatusList []model.SearchSourceStatus    `json:"source_status_items"`
+	PageInfo         model.PageInfo                `json:"page_info"`
+	Execution        model.SearchExecutionInfo     `json:"execution"`
+	SelectedTypes    []string                      `json:"selected_types,omitempty"`
+	SelectedSources  []string                      `json:"selected_sources,omitempty"`
+	SelectedSort     string                        `json:"selected_sort,omitempty"`
+	SelectedView     string                        `json:"selected_view,omitempty"`
+	SelectedYearFrom int                           `json:"selected_year_from,omitempty"`
+	SelectedYearTo   int                           `json:"selected_year_to,omitempty"`
+	SelectedMode     string                        `json:"selected_source_mode,omitempty"`
 }
 
 func NewSearchBootstrapHandler(
@@ -53,7 +66,8 @@ func NewSearchBootstrapHandler(
 }
 
 func (h *SearchBootstrapHandler) GetBootstrap(c *gin.Context) {
-	response, statusCode, code, message := h.buildBootstrapResponse(c)
+	request := parseSearchRequest(c)
+	response, statusCode, code, message := h.buildBootstrapResponseWithRequest(c, request, false)
 	if message != "" {
 		c.JSON(statusCode, model.Error(code, message))
 		return
@@ -63,7 +77,11 @@ func (h *SearchBootstrapHandler) GetBootstrap(c *gin.Context) {
 }
 
 func (h *SearchBootstrapHandler) GetBootstrapLegacy(c *gin.Context) {
-	response, statusCode, _, message := h.buildBootstrapResponse(c)
+	request := parseSearchRequest(c)
+	request.Page = searchDefaultPage
+	request.PageSize = searchMaximumPageSize
+
+	response, statusCode, _, message := h.buildBootstrapResponseWithRequest(c, request, true)
 	if message != "" {
 		c.JSON(statusCode, gin.H{"error": message})
 		return
@@ -75,7 +93,16 @@ func (h *SearchBootstrapHandler) GetBootstrapLegacy(c *gin.Context) {
 func (h *SearchBootstrapHandler) buildBootstrapResponse(
 	c *gin.Context,
 ) (*searchBootstrapResponse, int, int, string) {
-	query := strings.TrimSpace(c.Query("q"))
+	request := parseSearchRequest(c)
+	return h.buildBootstrapResponseWithRequest(c, request, false)
+}
+
+func (h *SearchBootstrapHandler) buildBootstrapResponseWithRequest(
+	c *gin.Context,
+	request model.SearchRequest,
+	forceReturnAll bool,
+) (*searchBootstrapResponse, int, int, string) {
+	query := strings.TrimSpace(request.Query)
 	username := resolveUsernameFromContext(c)
 	policy := resolveContentPolicyFromRequest(c, h.adminStorage)
 	sites := resolveVideoSites(
@@ -87,11 +114,22 @@ func (h *SearchBootstrapHandler) buildBootstrapResponse(
 	)
 
 	response := &searchBootstrapResponse{
-		Query:        query,
-		Results:      []model.SearchResult{},
-		History:      []string{},
-		Suggestions:  []string{},
-		SourceStatus: map[string]string{},
+		Query:            query,
+		NormalizedQuery:  "",
+		Results:          []model.SearchResult{},
+		Aggregates:       []model.SearchAggregateResult{},
+		Facets:           model.SearchFacets{},
+		History:          []string{},
+		Suggestions:      []string{},
+		SourceStatus:     map[string]string{},
+		SourceStatusList: []model.SearchSourceStatus{},
+		PageInfo:         model.PageInfo{Page: request.Page, PageSize: request.PageSize, TotalPages: 1},
+		Execution: model.SearchExecutionInfo{
+			Query:            query,
+			NormalizedQuery:  "",
+			CompletedSources: 0,
+			TotalSources:     len(sites),
+		},
 	}
 
 	group, ctx := errgroup.WithContext(c.Request.Context())
@@ -109,12 +147,35 @@ func (h *SearchBootstrapHandler) buildBootstrapResponse(
 
 	if query != "" {
 		group.Go(func() error {
-			results, err := h.searchService.Search(ctx, query, sites)
+			params := buildSearchParams(ctx, request, h.adminStorage)
+			if forceReturnAll {
+				params = buildLegacySearchParams(ctx, request, h.adminStorage)
+			}
+			envelope, err := h.searchService.SearchAdvanced(
+				ctx,
+				params,
+				sites,
+				policy,
+			)
 			if err != nil {
 				return err
 			}
-			response.Results = filterResults(results, policy)
-			response.SourceStatus = buildSearchBootstrapSourceStatus(response.Results)
+			response.Query = envelope.Query
+			response.NormalizedQuery = envelope.NormalizedQuery
+			response.Results = envelope.Results
+			response.Aggregates = envelope.Aggregates
+			response.Facets = envelope.Facets
+			response.SourceStatus = envelope.LegacySourceMap
+			response.SourceStatusList = envelope.SourceStatus
+			response.PageInfo = envelope.PageInfo
+			response.Execution = envelope.Execution
+			response.SelectedTypes = envelope.SelectedTypes
+			response.SelectedSources = envelope.SelectedSources
+			response.SelectedSort = envelope.SelectedSort
+			response.SelectedView = envelope.SelectedView
+			response.SelectedYearFrom = envelope.SelectedYearFrom
+			response.SelectedYearTo = envelope.SelectedYearTo
+			response.SelectedMode = envelope.SelectedMode
 			return nil
 		})
 
@@ -152,17 +213,4 @@ func (h *SearchBootstrapHandler) buildBootstrapResponse(
 	}
 
 	return response, http.StatusOK, model.CodeSuccess, ""
-}
-
-func buildSearchBootstrapSourceStatus(results []model.SearchResult) map[string]string {
-	status := make(map[string]string)
-	for _, item := range results {
-		source := strings.TrimSpace(item.Source)
-		if source == "" {
-			continue
-		}
-		status[source] = "done"
-	}
-
-	return status
 }

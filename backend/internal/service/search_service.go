@@ -23,6 +23,12 @@ import (
 type SearchService interface {
 	Search(ctx context.Context, query string, sites []model.ApiSite) ([]model.SearchResult, error)
 	SearchSingle(ctx context.Context, site model.ApiSite, query string) ([]model.SearchResult, error)
+	SearchAdvanced(
+		ctx context.Context,
+		params SearchParams,
+		sites []model.ApiSite,
+		policy ContentPolicy,
+	) (*model.SearchEnvelope, error)
 }
 
 type searchCacheEntry struct {
@@ -411,6 +417,7 @@ func (s *searchService) parseResults(items []model.ApiSearchItem, site model.Api
 			Desc:           item.VodContent,
 			TypeName:       item.TypeName,
 			DoubanID:       int(item.VodDoubanID),
+			Remarks:        strings.TrimSpace(item.VodRemarks),
 		}
 
 		results = append(results, EnrichSearchResult(result))

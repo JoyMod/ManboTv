@@ -6,6 +6,10 @@ interface SiteConfig {
   SiteName: string;
   Announcement: string;
   SearchDownstreamMaxPage: number;
+  SearchSourceTimeoutMs: number;
+  SearchMaxConcurrent: number;
+  SearchDefaultSort: string;
+  SearchEnableStream: boolean;
   SiteInterfaceCacheTime: number;
   DoubanProxyType: string;
   DoubanProxy: string;
@@ -83,6 +87,103 @@ export default function AdminSettingsPanel({
                 onConfigChange((prev) => ({
                   ...prev,
                   FluidSearch: e.target.checked,
+                }))
+              }
+              className='h-5 w-5 accent-netflix-red'
+            />
+          </div>
+
+          <div className='grid gap-4 border-t border-netflix-gray-800 pt-4 md:grid-cols-2'>
+            <div>
+              <label className='mb-2 block text-netflix-gray-300'>
+                搜索下探页数
+              </label>
+              <input
+                type='number'
+                min={1}
+                max={10}
+                value={siteConfig.SearchDownstreamMaxPage}
+                onChange={(e) =>
+                  onConfigChange((prev) => ({
+                    ...prev,
+                    SearchDownstreamMaxPage: Number.parseInt(e.target.value, 10) || 1,
+                  }))
+                }
+                className='w-full rounded-lg border border-netflix-gray-700 bg-netflix-gray-800 px-4 py-3 text-white focus:border-netflix-red focus:outline-none'
+              />
+            </div>
+
+            <div>
+              <label className='mb-2 block text-netflix-gray-300'>
+                单源超时毫秒
+              </label>
+              <input
+                type='number'
+                min={1000}
+                step={100}
+                value={siteConfig.SearchSourceTimeoutMs}
+                onChange={(e) =>
+                  onConfigChange((prev) => ({
+                    ...prev,
+                    SearchSourceTimeoutMs:
+                      Number.parseInt(e.target.value, 10) || 1000,
+                  }))
+                }
+                className='w-full rounded-lg border border-netflix-gray-700 bg-netflix-gray-800 px-4 py-3 text-white focus:border-netflix-red focus:outline-none'
+              />
+            </div>
+
+            <div>
+              <label className='mb-2 block text-netflix-gray-300'>
+                搜索并发上限
+              </label>
+              <input
+                type='number'
+                min={1}
+                max={20}
+                value={siteConfig.SearchMaxConcurrent}
+                onChange={(e) =>
+                  onConfigChange((prev) => ({
+                    ...prev,
+                    SearchMaxConcurrent: Number.parseInt(e.target.value, 10) || 1,
+                  }))
+                }
+                className='w-full rounded-lg border border-netflix-gray-700 bg-netflix-gray-800 px-4 py-3 text-white focus:border-netflix-red focus:outline-none'
+              />
+            </div>
+
+            <div>
+              <label className='mb-2 block text-netflix-gray-300'>
+                默认排序
+              </label>
+              <select
+                value={siteConfig.SearchDefaultSort}
+                onChange={(e) =>
+                  onConfigChange((prev) => ({
+                    ...prev,
+                    SearchDefaultSort: e.target.value,
+                  }))
+                }
+                className='w-full rounded-lg border border-netflix-gray-700 bg-netflix-gray-800 px-4 py-3 text-white focus:border-netflix-red focus:outline-none'
+              >
+                <option value='smart'>智能排序</option>
+                <option value='year_desc'>年份从新到旧</option>
+                <option value='year_asc'>年份从旧到新</option>
+                <option value='title'>标题排序</option>
+                <option value='playable'>可播放优先</option>
+              </select>
+            </div>
+          </div>
+
+          <div className='flex items-center justify-between border-t border-netflix-gray-800 py-4'>
+            <span className='text-netflix-gray-300'>启用搜索流式能力</span>
+            <input
+              type='checkbox'
+              checked={siteConfig.SearchEnableStream}
+              onChange={(e) =>
+                onConfigChange((prev) => ({
+                  ...prev,
+                  SearchEnableStream: e.target.checked,
                 }))
               }
               className='h-5 w-5 accent-netflix-red'

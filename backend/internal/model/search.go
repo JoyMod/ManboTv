@@ -85,6 +85,9 @@ type SearchResult struct {
 	DoubanID       int      `json:"douban_id,omitempty"`
 	Tags           []string `json:"tags,omitempty"`
 	IsAdult        bool     `json:"is_adult,omitempty"`
+	Remarks        string   `json:"remarks,omitempty"`
+	MatchScore     float64  `json:"match_score,omitempty"`
+	MatchReasons   []string `json:"match_reasons,omitempty"`
 }
 
 // ApiSite API站点配置
@@ -97,9 +100,18 @@ type ApiSite struct {
 
 // SearchRequest 搜索请求
 type SearchRequest struct {
-	Query    string `form:"q" binding:"required"`
-	Page     int    `form:"page,default=1" binding:"min=1"`
-	PageSize int    `form:"page_size,default=20" binding:"min=1,max=50"`
+	Query       string `form:"q" binding:"required"`
+	Page        int    `form:"page,default=1" binding:"min=1"`
+	PageSize    int    `form:"page_size,default=20" binding:"min=1,max=120"`
+	View        string `form:"view"`
+	Sort        string `form:"sort"`
+	Types       string `form:"types"`
+	Sources     string `form:"sources"`
+	YearFrom    int    `form:"year_from"`
+	YearTo      int    `form:"year_to"`
+	SourceMode  string `form:"source_mode"`
+	PreferExact bool   `form:"prefer_exact"`
+	Stream      bool   `form:"stream"`
 }
 
 // SearchResponse 搜索响应
@@ -109,6 +121,72 @@ type SearchResponse struct {
 	Page       int            `json:"page"`
 	PageSize   int            `json:"page_size"`
 	TotalPages int            `json:"total_pages"`
+}
+
+type SearchFacetBucket struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
+	Count int    `json:"count"`
+}
+
+type SearchFacets struct {
+	Types   []SearchFacetBucket `json:"types"`
+	Sources []SearchFacetBucket `json:"sources"`
+	Years   []SearchFacetBucket `json:"years"`
+}
+
+type SearchSourceStatus struct {
+	Source      string `json:"source"`
+	SourceName  string `json:"source_name"`
+	Status      string `json:"status"`
+	ResultCount int    `json:"result_count"`
+	PageCount   int    `json:"page_count"`
+	ElapsedMs   int64  `json:"elapsed_ms"`
+	Error       string `json:"error,omitempty"`
+}
+
+type SearchAggregateResult struct {
+	Key            string         `json:"key"`
+	Title          string         `json:"title"`
+	Year           string         `json:"year"`
+	Type           string         `json:"type"`
+	Cover          string         `json:"cover"`
+	Rating         string         `json:"rating,omitempty"`
+	SourceCount    int            `json:"source_count"`
+	ResultCount    int            `json:"result_count"`
+	BestSource     string         `json:"best_source,omitempty"`
+	BestSourceName string         `json:"best_source_name,omitempty"`
+	Tags           []string       `json:"tags,omitempty"`
+	Items          []SearchResult `json:"items"`
+}
+
+type SearchExecutionInfo struct {
+	Query            string `json:"query"`
+	NormalizedQuery  string `json:"normalized_query"`
+	CompletedSources int    `json:"completed_sources"`
+	TotalSources     int    `json:"total_sources"`
+	ElapsedMs        int64  `json:"elapsed_ms"`
+	Degraded         bool   `json:"degraded"`
+	StreamingEnabled bool   `json:"streaming_enabled"`
+}
+
+type SearchEnvelope struct {
+	Query            string                  `json:"query"`
+	NormalizedQuery  string                  `json:"normalized_query"`
+	Results          []SearchResult          `json:"results"`
+	Aggregates       []SearchAggregateResult `json:"aggregates"`
+	Facets           SearchFacets            `json:"facets"`
+	SourceStatus     []SearchSourceStatus    `json:"source_status_items"`
+	LegacySourceMap  map[string]string       `json:"source_status"`
+	PageInfo         PageInfo                `json:"page_info"`
+	Execution        SearchExecutionInfo     `json:"execution"`
+	SelectedTypes    []string                `json:"selected_types,omitempty"`
+	SelectedSources  []string                `json:"selected_sources,omitempty"`
+	SelectedSort     string                  `json:"selected_sort,omitempty"`
+	SelectedView     string                  `json:"selected_view,omitempty"`
+	SelectedYearFrom int                     `json:"selected_year_from,omitempty"`
+	SelectedYearTo   int                     `json:"selected_year_to,omitempty"`
+	SelectedMode     string                  `json:"selected_source_mode,omitempty"`
 }
 
 // ApiSearchItem 第三方API返回的原始数据

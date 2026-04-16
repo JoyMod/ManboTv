@@ -17,6 +17,10 @@ type legacySiteConfig struct {
 	SiteName                string   `json:"SiteName"`
 	Announcement            string   `json:"Announcement"`
 	SearchDownstreamMaxPage int      `json:"SearchDownstreamMaxPage"`
+	SearchSourceTimeoutMs   int      `json:"SearchSourceTimeoutMs"`
+	SearchMaxConcurrent     int      `json:"SearchMaxConcurrent"`
+	SearchDefaultSort       string   `json:"SearchDefaultSort"`
+	SearchEnableStream      bool     `json:"SearchEnableStream"`
 	SiteInterfaceCacheTime  int      `json:"SiteInterfaceCacheTime"`
 	DoubanProxyType         string   `json:"DoubanProxyType"`
 	DoubanProxy             string   `json:"DoubanProxy"`
@@ -85,6 +89,10 @@ func (h *AdminLegacyHandler) HandleConfigGet(c *gin.Context) {
 			"SiteName":                config.SiteConfig.SiteName,
 			"Announcement":            config.SiteConfig.Announcement,
 			"SearchDownstreamMaxPage": config.SiteConfig.SearchDownstreamMaxPage,
+			"SearchSourceTimeoutMs":   config.SiteConfig.SearchSourceTimeoutMs,
+			"SearchMaxConcurrent":     config.SiteConfig.SearchMaxConcurrent,
+			"SearchDefaultSort":       config.SiteConfig.SearchDefaultSort,
+			"SearchEnableStream":      config.SiteConfig.SearchEnableStream,
 			"SiteInterfaceCacheTime":  config.SiteConfig.SiteInterfaceCacheTime,
 			"DoubanProxyType":         config.SiteConfig.DoubanProxyType,
 			"DoubanProxy":             config.SiteConfig.DoubanProxy,
@@ -178,6 +186,10 @@ func (h *AdminLegacyHandler) HandleConfigPut(c *gin.Context) {
 			SiteName:                payload.SiteName,
 			Announcement:            payload.Announcement,
 			SearchDownstreamMaxPage: payload.SearchDownstreamMaxPage,
+			SearchSourceTimeoutMs:   payload.SearchSourceTimeoutMs,
+			SearchMaxConcurrent:     payload.SearchMaxConcurrent,
+			SearchDefaultSort:       payload.SearchDefaultSort,
+			SearchEnableStream:      payload.SearchEnableStream,
 			SiteInterfaceCacheTime:  payload.SiteInterfaceCacheTime,
 			DoubanProxyType:         payload.DoubanProxyType,
 			DoubanProxy:             payload.DoubanProxy,
